@@ -1,0 +1,21 @@
+name: Ogonz
+
+on:
+  push:
+    paths-ignore: ["maker/**"]
+  pull_request:
+    paths-ignore: ["maker/**"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+      - run: npm install --no-save playwright@1.63.0
+      - run: npx playwright install --with-deps chromium
+      - run: npm run smoke
