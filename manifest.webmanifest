@@ -1,13 +1,13 @@
 {
   "name": "Ogonz",
   "short_name": "Ogonz",
-  "description": "A life sim that plays itself. Watch a household of Ogonz live their lives.",
+  "description": "A trailer park life sim that plays itself. Get rich quick schemes included.",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",
   "orientation": "landscape",
-  "background_color": "#1b1f2a",
-  "theme_color": "#1b1f2a",
+  "background_color": "#15110d",
+  "theme_color": "#15110d",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }

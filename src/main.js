@@ -1,15 +1,20 @@
-// App shell: game loop, viewing controls (pause / speed), side panel, saving.
-// Ogonz plays itself; there is no other input.
+// App shell: game loop, pause / speed, the HUD boxes, saving.
+// The park plays itself; there is no other input.
 
-import { WORLD, NEEDS, NEED_LABELS, WEEKDAYS, TRAITS } from './data.js';
+import { WORLD, NEEDS, NEED_LABELS, WEEKDAYS, TRAITS, SCHEMES } from './data.js';
 import * as sim from './sim.js';
 import { draw } from './render.js';
 
-const SAVE_KEY = 'ogonz-save-v3';
+const SAVE_KEY = 'ogonz-save-v4';
 const SPOTLIGHT_SECONDS = 15;
 const $ = id => document.getElementById(id);
 const canvas = $('view');
 const ctx = canvas.getContext('2d');
+// The map is drawn at native pixel-art resolution, then scaled up crisply.
+const pix = document.createElement('canvas');
+pix.width = WORLD.w;
+pix.height = WORLD.h;
+const pctx = pix.getContext('2d');
 
 let s = load() || sim.newGame();
 let speed = 4;
@@ -35,15 +40,11 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) save(
 
 // ---------- canvas sizing ----------
 
-const fit = { scale: 1, ox: 0, oy: 0, dpr: 1 };
 function resize() {
   const r = canvas.getBoundingClientRect();
-  fit.dpr = Math.min(devicePixelRatio || 1, 2);
-  canvas.width = Math.round(r.width * fit.dpr);
-  canvas.height = Math.round(r.height * fit.dpr);
-  fit.scale = Math.min(r.width / WORLD.w, r.height / WORLD.h);
-  fit.ox = (r.width - WORLD.w * fit.scale) / 2;
-  fit.oy = (r.height - WORLD.h * fit.scale) / 2;
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, Math.round(r.width * dpr));
+  canvas.height = Math.max(1, Math.round(r.height * dpr));
 }
 new ResizeObserver(resize).observe(canvas);
 resize();
@@ -62,11 +63,7 @@ addEventListener('keydown', e => {
 });
 setSpeed(speed);
 
-// ---------- panel ----------
-// Rebuilt only when its structure changes; live values update in place.
-
-let panelKey = '';
-let updaters = [];
+// ---------- HUD ----------
 
 function el(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
@@ -78,109 +75,65 @@ function el(tag, attrs = {}, ...children) {
   for (const c of children) if (c != null) e.append(c);
   return e;
 }
-function live(node, fn) { updaters.push(() => fn(node)); return node; }
-function text(fn, cls) {
-  return live(el('span', cls ? { class: cls } : {}), n => { const t = fn(); if (n.textContent !== t) n.textContent = t; });
-}
-function meter(get) {
-  const fill = el('i');
-  live(fill, f => {
-    const v = get();
-    f.style.width = v + '%';
-    f.style.background = `hsl(${Math.round(v * 1.2)}, 70%, 50%)`;
-  });
-  return el('div', { class: 'meter' }, fill);
+const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };
+
+function updateHud() {
+  const c = sim.clock(s);
+  setText($('clock'), 'DAY ' + (c.day + 1) + ' · ' + WEEKDAYS[c.weekday].toUpperCase() + ' ' +
+    String(c.hour).padStart(2, '0') + ':' + String(c.minute).padStart(2, '0'));
+  setText($('cash'), sim.money(s.ogonz.reduce((t, o) => t + o.cash, 0)) + ' park cash');
+  const open = s.stalls.filter(st => { const o = sim.byId(s.ogonz, st.ownerId); return o && sim.isTending(o, st); }).length;
+  setText($('schemes'), 'SCHEMES · ' + s.stalls.length + ' ACTIVE · ' + open + ' OPEN');
+  const rich = s.ogonz.reduce((a, o) => (!a || o.cash > a.cash ? o : a), null);
+  setText($('top'), rich ? 'TOP HUSTLER: ' + rich.name + ' ' + sim.money(rich.cash) : '');
 }
 
-// The spotlight moves to the next Ogon at home every few seconds.
+// The spotlight moves to the next resident who is out and about every few seconds.
 function updateSpotlight(now) {
-  const home = s.ogonz.filter(o => !o.out);
-  const pool = home.length ? home : s.ogonz;
+  const seen = s.ogonz.filter(sim.visible);
+  const pool = seen.length ? seen : s.ogonz;
   const current = sim.byId(s.ogonz, spotlightId);
   if (!current || now - spotlightSince > SPOTLIGHT_SECONDS * 1000) {
     const next = pool[(pool.indexOf(current) + 1) % pool.length] || null;
     spotlightId = next ? next.id : null;
     spotlightSince = now;
+    buildSpot();
   }
 }
 
-function renderPanel() {
-  const spot = sim.byId(s.ogonz, spotlightId);
-  const key = s.ogonz.map(o => o.id + o.home + (o.partnerId ? 'p' : '')).join(',') + '|' + (spot ? spot.id : '');
-  if (key !== panelKey) {
-    panelKey = key;
-    updaters = [];
-    $('panel').replaceChildren(...panelContent(spot));
+let spotUpdaters = [];
+function buildSpot() {
+  const o = sim.byId(s.ogonz, spotlightId);
+  spotUpdaters = [];
+  const box = $('spot');
+  if (!o) { box.replaceChildren(); return; }
+  const live = (node, fn) => { spotUpdaters.push(() => fn(node)); return node; };
+  const needs = el('div', { class: 'needs' });
+  for (const n of NEEDS) {
+    const fill = el('i');
+    live(fill, f => { const v = o.needs[n]; f.style.width = v + '%'; f.style.background = `hsl(${Math.round(v * 1.2)}, 70%, 50%)`; });
+    needs.append(el('span', {}, NEED_LABELS[n]), el('div', { class: 'meter' }, fill));
   }
-  for (const u of updaters) u();
-}
-
-function panelContent(spot) {
-  const out = [];
-
-  if (spot) {
-    const apt = sim.room(spot.home);
-    out.push(el('h2', {}, spot.name));
-    out.push(el('div', { class: 'muted' }, text(() => {
-      const st = sim.stage(spot);
-      const role = spot.job ? spot.job.title : st === 'elder' ? 'Retired' : st === 'child' ? 'Little one' : 'Between jobs';
-      return Math.floor(spot.age) + ' · ' + spot.traits.map(t => TRAITS[t]).join(', ') + ' · ' + role + ' · ' + apt.name;
-    })));
-    out.push(el('div', { class: 'now' }, text(() => sim.activityLabel(s, spot))));
-    const needs = el('div', { class: 'needs' });
-    for (const n of NEEDS) needs.append(el('span', {}, NEED_LABELS[n]), meter(() => spot.needs[n]));
-    out.push(needs);
-    out.push(el('h3', {}, 'Feelings'));
-    out.push(live(el('ul', { class: 'rels' }), n => {
-      const rows = s.ogonz.filter(o => o !== spot)
-        .map(o => ({ o, v: sim.pairRel(spot, o), label: sim.relLabel(s, spot, o) }))
+  box.replaceChildren(
+    el('div', { class: 'name' }, o.name),
+    live(el('div', { class: 'muted' }), n => {
+      const st = sim.stallOf(s, o);
+      const what = st ? SCHEMES[st.type].name : sim.stage(o) === 'child' ? 'Kid' : 'No scheme';
+      setText(n, Math.floor(o.age) + ' · ' + o.traits.map(t => TRAITS[t]).join(', ') + ' · ' + what + ' · ' + sim.money(o.cash));
+    }),
+    live(el('div', { class: 'now' }), n => setText(n, sim.activityLabel(s, o))),
+    needs,
+    live(el('ul', { class: 'rels' }), n => {
+      const rows = s.ogonz.filter(x => x !== o)
+        .map(x => ({ x, v: sim.pairRel(o, x), label: sim.relLabel(s, o, x) }))
         .filter(r => r.label !== 'Stranger')
-        .sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 5);
-      const key = rows.map(r => r.o.id + r.label).join();
+        .sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 3);
+      const key = rows.map(r => r.x.id + r.label).join();
       if (n.dataset.key === key) return;
       n.dataset.key = key;
-      n.replaceChildren(...(rows.length ? rows.map(r => el('li', {},
-        el('span', { class: 'dot', style: 'background:' + r.o.color }), r.o.name + ' ',
-        el('span', { class: 'tag ' + tagClass(r.label) }, r.label))) : [el('li', { class: 'muted' }, 'Keeps to themselves')]));
-    }));
-  }
-
-  out.push(el('h3', {}, 'Gossip'));
-  out.push(live(el('div', { class: 'muted' }), n => {
-    let love = null, feud = null;
-    for (const a of s.ogonz) {
-      for (const b of s.ogonz) {
-        if (a.id >= b.id) continue;
-        const v = sim.pairRel(a, b);
-        if (a.partnerId === b.id && (!love || v > love.v)) love = { a, b, v };
-        if (!feud || v < feud.v) feud = { a, b, v };
-      }
-    }
-    const t = [love ? '♥ ' + love.a.name + ' & ' + love.b.name : 'Nobody is in love (yet)',
-      feud && feud.v < -15 ? '⚔ ' + feud.a.name + ' vs ' + feud.b.name + ' (' + sim.relLabel(s, feud.a, feud.b) + ')'
-        : 'No feuds. Suspicious.'].join('  ·  ');
-    if (n.textContent !== t) n.textContent = t;
-  }));
-
-  out.push(el('h3', {}, 'Residents · ' + s.ogonz.length));
-  const chips = el('div', { class: 'chips' });
-  for (const o of s.ogonz) {
-    chips.append(el('span', { class: 'chip' + (o === spot ? ' on' : '') },
-      live(el('span', { class: 'dot' }), d => { d.style.background = `hsl(${Math.round(sim.mood(o) * 1.2)}, 70%, 50%)`; }),
-      o.name, el('span', { class: 'muted' }, ' ' + o.home)));
-  }
-  out.push(chips);
-
-  out.push(el('h3', {}, 'News'));
-  out.push(live(el('ul', { class: 'log' }), n => {
-    const items = s.log.slice(-10).reverse();
-    const key = items.map(l => l.t + l.text).join('\n');
-    if (n.dataset.key !== key) {
-      n.dataset.key = key;
-      n.replaceChildren(...items.map(l => el('li', {}, 'Day ' + (Math.floor(l.t / 1440) + 1) + ' · ' + l.text)));
-    }
-  }));
-  return out;
+      n.replaceChildren(...rows.map(r => el('li', {}, el('span', {}, r.x.name), el('span', { class: 'tag ' + tagClass(r.label) }, r.label))));
+    })
+  );
 }
 
 function tagClass(label) {
@@ -190,11 +143,13 @@ function tagClass(label) {
   return '';
 }
 
-function updateBar() {
-  const c = sim.clock(s);
-  $('clock').textContent = 'Day ' + (c.day + 1) + ' · ' + WEEKDAYS[c.weekday] + ' ' +
-    String(c.hour).padStart(2, '0') + ':' + String(c.minute).padStart(2, '0');
-  $('money').textContent = s.ogonz.length + ' residents';
+function updateNews() {
+  const items = s.log.slice(-3).reverse();
+  const n = $('news');
+  const key = items.map(l => l.t + l.text).join('\n');
+  if (n.dataset.key === key) return;
+  n.dataset.key = key;
+  n.replaceChildren(...items.map(l => el('li', {}, 'DAY ' + (Math.floor(l.t / 1440) + 1) + ' · ' + l.text)));
 }
 
 // ---------- loop ----------
@@ -204,16 +159,16 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (speed) sim.step(s, dt * speed);
+  if (!sim.byId(s.ogonz, spotlightId)) spotlightSince = 0;
   updateSpotlight(now);
 
-  ctx.setTransform(fit.dpr, 0, 0, fit.dpr, 0, 0);
-  ctx.fillStyle = '#1b1f2a';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(fit.dpr * fit.scale, 0, 0, fit.dpr * fit.scale, fit.dpr * fit.ox, fit.dpr * fit.oy);
-  draw(ctx, s, { selectedId: spotlightId, time: now / 1000 });
+  draw(pctx, s, { selectedId: spotlightId, time: now / 1000 });
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(pix, 0, 0, canvas.width, canvas.height);
 
-  updateBar();
-  renderPanel();
+  updateHud();
+  for (const u of spotUpdaters) u();
+  updateNews();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

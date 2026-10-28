@@ -50,9 +50,9 @@ try {
 
     await page.goto(url);
     await page.evaluate(() => navigator.serviceWorker.ready);
-    await page.locator('#panel h3', { hasText: 'Residents' }).waitFor();
+    await page.locator('#spot .name').waitFor();
     const start = await state();
-    for (const n of start.names) await page.locator('#panel .chip', { hasText: n }).first().waitFor();
+    if (!start.names.includes(await page.textContent('#spot .name'))) fail(name + ': spotlight shows no resident');
 
     // It runs by itself; speed it up and let a couple of days pass.
     await page.click('#speeds button[data-speed="15"]');
@@ -60,8 +60,8 @@ try {
     await page.waitForTimeout(1500);
     const later = await state();
     if (later.minutes - start.minutes < 2 * 1440) fail(name + ': time did not advance');
-    if (!(await page.locator('#panel .log li').count())) fail(name + ': no news');
-    if (!(await page.textContent('#clock')).startsWith('Day 3')) fail(name + ': clock shows ' + await page.textContent('#clock'));
+    if (!(await page.locator('#news li').count())) fail(name + ': no news');
+    if (!(await page.textContent('#clock')).startsWith('DAY 3')) fail(name + ': clock shows ' + await page.textContent('#clock'));
 
     // Pause stops time.
     await page.click('#speeds button[data-speed="0"]');
@@ -75,12 +75,12 @@ try {
     // Reload, then reload offline: the same household is still there.
     const saved = await state();
     await page.reload();
-    await page.locator('#panel h3', { hasText: 'Residents' }).waitFor();
+    await page.locator('#spot .name').waitFor();
     const reloaded = await state();
     if (reloaded.names.join() !== saved.names.join()) fail(name + ': save not restored');
     await context.setOffline(true);
     await page.reload();
-    await page.locator('#panel h3', { hasText: 'Residents' }).waitFor();
+    await page.locator('#spot .name').waitFor();
     if ((await state()).names.join() !== saved.names.join()) fail(name + ': offline reload failed');
 
     if (errors.length) fail(name + ': page errors: ' + errors.join('; '));

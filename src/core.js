@@ -1,13 +1,14 @@
 // Core simulation shared by the life and fun modules: randomness, time,
-// residents' needs, autonomy, movement through the building, and how
-// residents interact with each other. No DOM, no player input.
+// residents' needs, autonomy, walking around the park, going inside trailers,
+// running and buying from schemes, and how residents treat each other.
+// No DOM, no player input.
 
 import {
-  ROOMS, ELEVATOR, EXIT_X, WALK, RIDE_MINUTES, CHAT_MINUTES, NEEDS, DECAY, CATALOG,
+  PARK, GATE, AMENITY_INFO, INDOOR, SCHEMES, SCHEME_HOURS, WALK, CHAT_MINUTES, NEEDS, DECAY,
   CHEMISTRY, SCHOOL, ADULT_AGE, ELDER_AGE
 } from './data.js';
 
-const CHAT_RANGE = 48;
+const CHAT_RANGE = 16;
 
 // ---------- random (seeded, stored in state so runs are reproducible) ----------
 
@@ -25,8 +26,10 @@ export const clamp = v => Math.max(0, Math.min(100, v));
 // ---------- lookups ----------
 
 export const byId = (list, id) => list.find(x => x.id === id);
-export const room = id => ROOMS.find(r => r.id === id);
 export const has = (o, trait) => o.traits.includes(trait);
+export const trailerOf = (s, o) => byId(s.trailers, o.home);
+export const stallOf = (s, o) => s.stalls.find(st => st.ownerId === o.id);
+export const doorOf = t => ({ x: t.x - 14, y: t.y + 3 });
 
 export function clock(s) {
   const day = Math.floor(s.minutes / 1440);
@@ -56,7 +59,9 @@ export function log(s, text) {
 
 export const eventActive = (s, type) => s.events.some(e => e.type === type && e.until > s.minutes);
 export const statusActive = (s, o, key) => (o.status[key] || 0) > s.minutes;
-export const home = o => !o.out;     // inside the building
+export const present = o => !o.out;          // in the park (possibly inside a trailer)
+export const visible = o => !o.out && !o.inside;
+export const money = n => '$' + Math.round(n).toLocaleString('en-US');
 
 // ---------- relationships ----------
 
@@ -64,7 +69,6 @@ export const getRel = (a, b) => a.rel[b.id] || 0;
 export function addRel(a, b, d) {
   a.rel[b.id] = Math.max(-100, Math.min(100, getRel(a, b) + d));
 }
-// Average of both directions.
 export const pairRel = (a, b) => (getRel(a, b) + getRel(b, a)) / 2;
 
 export function related(a, b) {
@@ -82,8 +86,13 @@ export function compat(a, b) {
     }
   }
   const lo = Math.min(a.id, b.id), hi = Math.max(a.id, b.id);
-  const spark = (((lo * 2654435761) ^ (hi * 40503)) >>> 0) % 1000 / 1000 - 0.5;   // -0.5..0.5
+  const spark = (((lo * 2654435761) ^ (hi * 40503)) >>> 0) % 1000 / 1000 - 0.5;
   return Math.max(-1, Math.min(1, sum / Math.max(1, n) + spark * 0.6));
+}
+
+export function canRomance(a, b) {
+  return stage(a) !== 'child' && stage(b) !== 'child' && !related(a, b) &&
+    (a.partnerId === b.id || (!a.partnerId && !b.partnerId));
 }
 
 export function relLabel(s, a, b) {
@@ -101,61 +110,65 @@ export function relLabel(s, a, b) {
   return 'Best friend';
 }
 
-export function canRomance(a, b) {
-  return stage(a) !== 'child' && stage(b) !== 'child' && !related(a, b) &&
-    (a.partnerId === b.id || (!a.partnerId && !b.partnerId));
-}
+// ---------- state of a resident ----------
 
-// ---------- availability ----------
+const step0 = o => o.plan && o.plan.steps[0];
 
 export function isSleeping(s, o) {
-  const step = o.plan && o.plan.steps[0];
-  if (!step) return false;
-  if (step.type === 'passout') return true;
-  if (step.type !== 'use') return false;
-  const obj = byId(s.objects, step.objectId);
-  return !!(obj && obj.user === o.id && CATALOG[obj.type].sleep);
+  const st = step0(o);
+  return !!st && ((st.type === 'indoor' && st.kind === 'sleep' && o.inside) || st.type === 'passout');
+}
+
+export function isTending(o, stall) {
+  const st = step0(o);
+  return !!st && st.type === 'tend' && (!stall || st.stallId === stall.id) && dist(o, stall || o) < 14;
 }
 
 function available(s, o) {
-  return home(o) && !isSleeping(s, o) && !(o.plan && (o.plan.work || o.plan.forced));
+  return visible(o) && !isSleeping(s, o) && !(o.plan && (o.plan.work || o.plan.forced || o.plan.event));
 }
 
 export function activityLabel(s, o) {
   let label;
-  if (o.out) label = { work: 'At work', school: 'At school', space: 'In outer space' }[o.out.reason] || 'Out';
+  if (o.out) label = { school: 'At school', space: 'In outer space', away: 'Away' }[o.out.reason] || 'Out';
   else label = o.plan ? o.plan.label : 'Idle';
   if (statusActive(s, o, 'cat')) label += ' (as a cat)';
   return label;
 }
 
-// Objects a resident may use: their own apartment's and the common rooms'.
-function usable(o, obj) {
-  const cat = CATALOG[obj.type];
-  if (!cat.verb) return false;
-  if (cat.kids && o.age >= 12) return false;
-  const r = room(obj.room);
-  return r.common || obj.room === o.home;
-}
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
 // ---------- plans ----------
 
 export function endPlan(s, o) {
-  for (const obj of s.objects) if (obj.user === o.id) obj.user = null;
+  for (const a of s.amenities) a.users = a.users.filter(id => id !== o.id);
+  if (o.inside) exitTrailer(s, o);
   o.plan = null;
 }
 
-function usePlan(obj) {
-  const cat = CATALOG[obj.type];
-  return {
-    label: cat.verb, long: !!cat.sleep,
-    steps: [{ type: 'goto', floor: obj.floor, x: obj.x }, { type: 'use', objectId: obj.id, left: cat.minutes }]
-  };
+function exitTrailer(s, o) {
+  const t = byId(s.trailers, o.inside);
+  o.inside = null;
+  if (t) { const d = doorOf(t); o.x = d.x; o.y = d.y; }
 }
 
-function travel(o, floor, x) {
-  if (o.floor === floor) return Math.abs(o.x - x);
-  return Math.abs(o.x - ELEVATOR.x) + Math.abs(ELEVATOR.x - x) + Math.abs(floor - o.floor) * RIDE_MINUTES * WALK;
+function indoorPlan(s, o, kind) {
+  const t = trailerOf(s, o);
+  const d = doorOf(t);
+  const info = INDOOR[kind];
+  return { label: info.verb, long: !!info.sleep, steps: [
+    { type: 'goto', x: d.x, y: d.y }, { type: 'indoor', kind, left: info.minutes }] };
+}
+
+function amenityPlan(s, a) {
+  const info = AMENITY_INFO[a.type];
+  const x = a.x + (rand(s) - 0.5) * (a.spread || 0);
+  return { label: info.verb, steps: [
+    { type: 'goto', x, y: a.y + (a.dy ?? 10) }, { type: 'use', amenityId: a.id, left: info.minutes }] };
+}
+
+function travel(o, x, y) {
+  return Math.hypot(o.x - x, o.y - y);
 }
 
 // Value of gaining `amount` of a need: worth more the lower the need is.
@@ -164,74 +177,98 @@ function needValue(o, need, amount) {
   return Math.min(amount, deficit) * Math.pow(deficit / 100, 2);
 }
 
+export function schemeOpen(s) {
+  const h = clock(s).hourF;
+  return h >= SCHEME_HOURS.start && h < SCHEME_HOURS.end;
+}
+
 function choosePlan(s, o) {
   const hour = clock(s).hourF;
   const night = hour >= 21 || hour < 5;
   let best = null, bestScore = 4;
+  const consider = (score, plan) => { if (score > bestScore) { bestScore = score; best = plan; } };
+  const far = (x, y) => 1 + travel(o, x, y) / 250;
 
-  for (const obj of s.objects) {
-    const cat = CATALOG[obj.type];
-    if (!usable(o, obj) || (obj.user && obj.user !== o.id)) continue;
-    let score = 0;
-    for (const need in cat.gains) score += needValue(o, need, cat.gains[need] * cat.minutes);
-    if (cat.sleep) score *= (night && o.needs.energy < 85 ? 3 : 0.7) * (has(o, 'sleepy') ? 1.6 : 1);
-    if (cat.gains.fun && has(o, 'party')) score *= 1.4;
-    score = score / (1 + travel(o, obj.floor, obj.x) / 400) + rand(s) * 0.5;
-    if (score > bestScore) { bestScore = score; best = usePlan(obj); }
-  }
-
-  for (const t of s.ogonz) {
-    if (t === o || !available(s, t)) continue;
-    const r = getRel(o, t);
-    let f = 1;
-    if (r < -30) f = has(o, 'grumpy') || has(o, 'dramatic') ? 0.9 : 0.15;   // drama seekers go looking for trouble
-    if (o.partnerId === t.id) f *= 1.6;
-    if (has(o, 'shy')) f *= 0.6;
-    if (has(o, 'prankster') || has(o, 'gossip')) f *= 1.25;
-    const score = needValue(o, 'social', 50) * f / (1 + travel(o, t.floor, t.x) / 900) + rand(s) * 0.5;
-    if (score > bestScore) {
-      bestScore = score;
-      best = { label: 'Looking for ' + t.name, long: true, steps: [{ type: 'approach', targetId: t.id }] };
+  // Inside their own trailer.
+  const t = trailerOf(s, o);
+  if (t) {
+    const d = doorOf(t);
+    for (const kind in INDOOR) {
+      const info = INDOOR[kind];
+      let score = 0;
+      for (const need in info.gains) score += needValue(o, need, info.gains[need] * info.minutes);
+      if (info.sleep) score *= (night && o.needs.energy < 85 ? 3 : 0.7) * (has(o, 'sleepy') ? 1.6 : 1);
+      if (kind === 'tv') score *= 0.8;
+      consider(score / far(d.x, d.y) + rand(s) * 0.5, () => indoorPlan(s, o, kind));
     }
   }
-  if (best) return best;
 
-  // Nothing pressing: potter about at home, or hang out downstairs.
-  const r = chance(s, 0.3) || !o.home ? pick(s, ROOMS.filter(x => x.common)) : room(o.home);
+  // Shared amenities around the park.
+  for (const a of s.amenities) {
+    const info = AMENITY_INFO[a.type];
+    if (!info.gains || a.users.length >= a.slots || (a.brokenUntil || 0) > s.minutes) continue;
+    if (a.type === 'catapult' && stage(o) === 'child') continue;
+    let score = 0;
+    for (const need in info.gains) score += needValue(o, need, info.gains[need] * info.minutes);
+    if (info.gains.fun && has(o, 'party')) score *= 1.4;
+    consider(score / far(a.x, a.y) + rand(s) * 0.5, () => amenityPlan(s, a));
+  }
+
+  // Running their own scheme during business hours.
+  const mine = stallOf(s, o);
+  if (mine && schemeOpen(s) && stage(o) !== 'child') {
+    const drive = (has(o, 'hustler') ? 14 : 9) * (o.needs.energy > 30 ? 1 : 0.3);
+    consider(drive / far(mine.x, mine.y) + rand(s), () => ({ label: 'Running ' + SCHEMES[mine.type].name.toLowerCase(),
+      long: true, steps: [{ type: 'goto', x: mine.x, y: mine.y + 8 }, { type: 'tend', stallId: mine.id, left: 90 }] }));
+  }
+
+  // Buying from someone else's scheme.
+  for (const st of s.stalls) {
+    const owner = byId(s.ogonz, st.ownerId);
+    const sc = SCHEMES[st.type];
+    if (!owner || owner === o || o.cash < sc.price || !isTending(owner, st)) continue;
+    let score = 0;
+    for (const need in sc.gains) score += needValue(o, need, sc.gains[need]) * 1.5;
+    score *= has(o, 'gullible') ? 2 : has(o, 'hustler') ? 0.4 : 1;
+    score *= getRel(o, owner) < -20 ? 0.2 : 1;
+    consider(score / far(st.x, st.y) + rand(s) * 0.5, () => ({ label: 'Buying ' + sc.name.toLowerCase(),
+      steps: [{ type: 'goto', x: st.x - 8, y: st.y + 10 }, { type: 'buy', stallId: st.id }] }));
+  }
+
+  // Someone to talk to (or pick a fight with).
+  for (const other of s.ogonz) {
+    if (other === o || !available(s, other)) continue;
+    const r = getRel(o, other);
+    let f = 1;
+    if (r < -30) f = has(o, 'grumpy') || has(o, 'dramatic') ? 0.9 : 0.15;
+    if (o.partnerId === other.id) f *= 1.6;
+    if (has(o, 'prankster') || has(o, 'gossip') || has(o, 'hustler')) f *= 1.25;
+    consider(needValue(o, 'social', 50) * f / (1 + travel(o, other.x, other.y) / 500) + rand(s) * 0.5,
+      () => ({ label: 'Looking for ' + other.name, long: true, steps: [{ type: 'approach', targetId: other.id }] }));
+  }
+
+  if (best) return best();
   return {
-    label: r.common ? 'Hanging out in the ' + r.name.toLowerCase() : 'Pottering about',
+    label: pick(s, ['Wandering about', 'Kicking a can', 'Staring at the sky', 'Admiring the cacti', 'Pacing']),
     long: true,
-    steps: [{ type: 'goto', floor: r.floor, x: r.l + 20 + rand(s) * (r.r - r.l - 40) }, { type: 'wait', left: 10 + rand(s) * 25 }]
+    steps: [{ type: 'goto', x: PARK.left + 30 + rand(s) * (PARK.right - PARK.left - 60),
+      y: PARK.top + 40 + rand(s) * (PARK.bottom - PARK.top - 60) }, { type: 'wait', left: 10 + rand(s) * 25 }]
   };
 }
 
 // ---------- movement ----------
 
-function rideMinutes(s, floors) {
-  return Math.abs(floors) * RIDE_MINUTES * (eventActive(s, 'elevator') ? 6 : 1);
-}
-
-// Moves toward (floor, x), using the elevator between floors. True on arrival.
-function move(s, o, floor, x, dt) {
-  if (o.ride) {
-    o.ride.t += dt / o.ride.minutes;
-    if (o.ride.t >= 1) { o.floor = o.ride.to; o.ride = null; }
-    return false;
-  }
-  const budget = WALK * dt * (stage(o) === 'elder' ? 0.7 : 1);
-  const tx = o.floor === floor ? x : ELEVATOR.x;
-  const dx = tx - o.x;
-  if (Math.abs(dx) > budget) {
-    o.x += Math.sign(dx) * budget;
-    o.facing = Math.sign(dx);
-    return false;
-  }
-  o.x = tx;
-  if (o.floor !== floor) {
-    o.ride = { from: o.floor, to: floor, t: 0, minutes: rideMinutes(s, floor - o.floor) };
-    return false;
-  }
-  return true;
+// Walks straight toward (x, y). True on arrival.
+function move(s, o, x, y, dt) {
+  const speed = WALK * (stage(o) === 'elder' ? 0.7 : 1) * (statusActive(s, o, 'chased') ? 2.2 : 1);
+  const dx = x - o.x, dy = y - o.y;
+  const d = Math.hypot(dx, dy);
+  const step = speed * dt;
+  if (Math.abs(dx) > 0.5) o.facing = Math.sign(dx);
+  if (d <= step) { o.x = x; o.y = y; return true; }
+  o.x += dx / d * step;
+  o.y += dy / d * step;
+  return false;
 }
 
 // ---------- per-resident tick ----------
@@ -243,22 +280,16 @@ export function tickResident(s, o, dt) {
   checkOut(s, o);
   if (o.out) return;
 
-  // Fun-event effects on residents at home.
-  if (eventActive(s, 'gravity')) o.needs.fun = clamp(o.needs.fun + 0.3 * dt);
-  const ghost = s.events.find(e => e.type === 'ghost' && e.until > s.minutes);
-  if (ghost && o.floor === room(ghost.room).floor && inRoom(o, ghost.room)) o.needs.fun = clamp(o.needs.fun - 0.3 * dt);
-
   if (o.needs.bladder <= 0) {
     o.needs.bladder = 100;
     o.needs.hygiene = 0;
     o.needs.fun = clamp(o.needs.fun - 25);
-    log(s, o.name + ' had an accident!');
+    log(s, o.name + ' had an accident behind a cactus');
   }
   if (o.needs.energy <= 0 && !isSleeping(s, o) && !(o.plan && o.plan.work)) {
     endPlan(s, o);
-    o.ride = null;
-    o.plan = { label: 'Passed out', forced: true, steps: [{ type: 'passout', left: 120 }] };
-    log(s, o.name + ' fell asleep on the floor');
+    o.plan = { label: 'Passed out in the dirt', forced: true, steps: [{ type: 'passout', left: 120 }] };
+    log(s, o.name + ' fell asleep face down in the dirt');
   }
 
   if (o.plan && urgentElsewhere(s, o)) endPlan(s, o);
@@ -266,55 +297,49 @@ export function tickResident(s, o, dt) {
   runStep(s, o, dt);
 }
 
-export function inRoom(o, roomId) {
-  const r = room(roomId);
-  return o.floor === r.floor && o.x >= r.l && o.x <= r.r;
-}
-
-// True when the resident is in a long activity (sleep, chat, wander, dance), a
-// need is critical, and a free object could fix it. Short activities always
-// finish, so plans can't thrash.
+// True when the resident is in a long activity (sleep, chat, wander, tending,
+// a gathering), a need is critical, and something could fix it. Short
+// activities always finish, so plans can't thrash.
 function urgentElsewhere(s, o) {
   const plan = o.plan;
   if (!plan.long) return false;
   const served = new Set();
   for (const st of plan.steps) {
-    const obj = st.objectId && byId(s.objects, st.objectId);
-    if (obj) Object.keys(CATALOG[obj.type].gains || {}).forEach(n => served.add(n));
-    if (st.type === 'approach' || st.type === 'interact' || st.type === 'dance') served.add('social');
+    const gains = st.type === 'indoor' ? INDOOR[st.kind].gains
+      : st.type === 'use' ? AMENITY_INFO[byId(s.amenities, st.amenityId).type].gains
+        : st.type === 'gather' ? st.gains : null;
+    if (gains) Object.keys(gains).forEach(n => served.add(n));
+    if (st.type === 'approach' || st.type === 'interact') served.add('social');
   }
   const needs = isSleeping(s, o) ? ['hunger', 'bladder'] : NEEDS;   // only worth waking up for these
-  return needs.some(n => o.needs[n] < 12 && !served.has(n) &&
-    s.objects.some(obj => !obj.user && usable(o, obj) && n in (CATALOG[obj.type].gains || {})));
+  return needs.some(n => o.needs[n] < 12 && !served.has(n));
 }
 
-// Leaving for work/school, and coming back from wherever they went.
+// School for kids, and coming back from wherever they went.
 function checkOut(s, o) {
   const c = clock(s);
   if (o.out) {
     if (s.minutes >= o.out.until) {
       if (o.out.reason === 'space') {
         o.needs.fun = 100;
-        log(s, o.name + ' was returned by the aliens, glowing slightly');
+        log(s, o.name + ' was returned by the aliens. The tinfoil crowd feels vindicated.');
         if (!has(o, 'conspiracy') && chance(s, 0.5)) {
           o.traits[1] = 'conspiracy';
-          log(s, o.name + ' now has some theories');
+          o.hat = 'tinfoil';
         }
       }
       o.out = null;
-      o.floor = 0;
-      o.x = EXIT_X;
+      o.x = GATE.x;
+      o.y = GATE.y - 6;
     }
     return;
   }
-  if (!o.job || c.weekday >= 5) return;
-  const due = o.workedDay !== c.day && c.hourF >= o.job.start - 1 && c.hourF < o.job.end - 1;
+  if (stage(o) !== 'child' || o.age < 6 || c.weekday >= 5) return;
+  const due = o.workedDay !== c.day && c.hourF >= SCHOOL.start - 1 && c.hourF < SCHOOL.end - 1;
   if (due && !(o.plan && (o.plan.work || o.plan.forced))) {
     endPlan(s, o);
-    const school = o.job.title === SCHOOL.title;
-    o.plan = { label: school ? 'Going to school' : 'Off to work', work: true,
-      steps: [{ type: 'goto', floor: 0, x: EXIT_X }, { type: 'leave', reason: school ? 'school' : 'work',
-        until: c.day * 1440 + o.job.end * 60 }] };
+    o.plan = { label: 'Going to school', work: true, steps: [
+      { type: 'goto', x: GATE.x, y: GATE.y }, { type: 'leave', reason: 'school', until: c.day * 1440 + SCHOOL.end * 60 }] };
   }
 }
 
@@ -325,7 +350,7 @@ function runStep(s, o, dt) {
 
   switch (st.type) {
     case 'goto':
-      done = move(s, o, st.floor, st.x, dt);
+      done = move(s, o, st.x, st.y, dt);
       break;
 
     case 'wait':
@@ -342,46 +367,103 @@ function runStep(s, o, dt) {
     case 'leave':
       o.out = { reason: st.reason, until: Math.max(st.until, s.minutes + 30) };
       o.workedDay = clock(s).day;
-      o.ride = null;
       done = true;
       break;
 
-    case 'use': {
-      const obj = byId(s.objects, st.objectId);
-      if (!obj || (obj.user && obj.user !== o.id)) return endPlan(s, o);
-      obj.user = o.id;
-      const cat = CATALOG[obj.type];
-      for (const need in cat.gains) o.needs[need] = clamp(o.needs[need] + cat.gains[need] * dt);
+    case 'indoor': {
+      const t = trailerOf(s, o);
+      if (!t) return endPlan(s, o);
+      o.inside = t.id;
+      const info = INDOOR[st.kind];
+      for (const need in info.gains) o.needs[need] = clamp(o.needs[need] + info.gains[need] * dt);
       st.left -= dt;
-      if (st.left <= 0 || Object.keys(cat.gains).every(n => o.needs[n] >= 99.5)) { obj.user = null; done = true; }
+      if (st.left <= 0 || Object.keys(info.gains).every(n => o.needs[n] >= 99.5)) {
+        exitTrailer(s, o);
+        done = true;
+      }
       break;
     }
 
-    case 'dance': {
-      o.needs.fun = clamp(o.needs.fun + 1.2 * dt);
-      o.needs.social = clamp(o.needs.social + 1 * dt);
+    case 'use': {
+      const a = byId(s.amenities, st.amenityId);
+      if (!a.users.includes(o.id)) {
+        if (a.users.length >= a.slots || (a.brokenUntil || 0) > s.minutes) return endPlan(s, o);
+        a.users.push(o.id);
+      }
+      const info = AMENITY_INFO[a.type];
+      for (const need in info.gains) o.needs[need] = clamp(o.needs[need] + info.gains[need] * dt);
+      st.left -= dt;
+      if (st.left <= 0 || Object.keys(info.gains).every(n => o.needs[n] >= 99.5)) {
+        a.users = a.users.filter(id => id !== o.id);
+        if (a.type === 'catapult') launch(s, o);
+        done = true;
+      }
+      break;
+    }
+
+    case 'tend': {
+      const stall = byId(s.stalls, st.stallId);
+      if (!stall || !schemeOpen(s)) return endPlan(s, o);
+      // Passing tourists, mostly.
+      const sc = SCHEMES[stall.type];
+      const rate = 0.006 * stall.hype * (has(o, 'hustler') ? 1.6 : 1);
+      if (chance(s, rate * dt)) { o.cash += sc.price; stall.earned += sc.price; }
+      o.needs.fun = clamp(o.needs.fun + (has(o, 'hustler') ? 0.3 : -0.05) * dt);
+      st.left -= dt;
+      done = st.left <= 0;
+      break;
+    }
+
+    case 'buy': {
+      const stall = byId(s.stalls, st.stallId);
+      const owner = stall && byId(s.ogonz, stall.ownerId);
+      const sc = stall && SCHEMES[stall.type];
+      if (owner && isTending(owner, stall) && o.cash >= sc.price) {
+        o.cash -= sc.price;
+        owner.cash += sc.price;
+        stall.earned += sc.price;
+        for (const need in sc.gains) o.needs[need] = clamp(o.needs[need] + sc.gains[need]);
+        addRel(o, owner, 3);
+        addRel(owner, o, 4);
+        if (sc.scam) o.regrets.push({ ownerId: owner.id, type: stall.type });
+        if (chance(s, 0.12)) log(s, o.name + ' bought ' + sc.name.toLowerCase() + ' from ' + owner.name + ' for ' + money(sc.price));
+      }
+      done = true;
+      break;
+    }
+
+    case 'gather': {
+      // Event gatherings (seminar, BBQ party, races). fun.js sets the gains.
+      if (!eventActive(s, st.event)) { done = true; break; }
+      for (const need in st.gains) o.needs[need] = clamp(o.needs[need] + st.gains[need] * dt);
+      if (st.event === 'seminar' && o.cash > 0) {
+        const loss = Math.min(o.cash, (has(o, 'gullible') ? 1.2 : 0.4) * dt);
+        o.cash -= loss;
+        s.seminarTake = (s.seminarTake || 0) + loss;
+      }
       for (const t of s.ogonz) {
-        if (t !== o && t.plan && t.plan.steps[0] && t.plan.steps[0].type === 'dance') addRel(o, t, 0.15 * dt);
+        const ts = step0(t);
+        if (t !== o && ts && ts.type === 'gather' && ts.event === st.event) addRel(o, t, 0.1 * dt);
       }
       st.left -= dt;
-      done = st.left <= 0 || !eventActive(s, 'dance');
+      done = st.left <= 0;
       break;
     }
 
     case 'approach': {
       const t = byId(s.ogonz, st.targetId);
       if (!t || !available(s, t)) return endPlan(s, o);
-      if (t.floor === o.floor && !t.ride && !o.ride && Math.abs(t.x - o.x) <= CHAT_RANGE) {
+      if (dist(o, t) <= CHAT_RANGE) {
         startInteraction(s, o, t);
         return;
       }
-      move(s, o, t.floor, t.x + (o.x < t.x ? -40 : 40), dt);
+      move(s, o, t.x + (o.x < t.x ? -11 : 11), t.y, dt);
       break;
     }
 
     case 'interact': {
       const t = byId(s.ogonz, st.withId);
-      if (!t || t.out || !(t.plan && t.plan.withId === o.id)) return endPlan(s, o);
+      if (!t || !visible(t) || !(t.plan && t.plan.withId === o.id)) return endPlan(s, o);
       interactEffects(s, o, t, st, dt);
       o.facing = Math.sign(t.x - o.x) || o.facing;
       st.left -= dt;
@@ -396,6 +478,16 @@ function runStep(s, o, dt) {
   }
 }
 
+// The catapult throws you somewhere random in the park.
+function launch(s, o) {
+  const x = PARK.left + 40 + rand(s) * (PARK.right - PARK.left - 80);
+  const y = PARK.top + 60 + rand(s) * (PARK.bottom - PARK.top - 80);
+  s.events.push({ type: 'flight', start: s.minutes, until: s.minutes + 6, who: o.id, fx: o.x, fy: o.y, tx: x, ty: y });
+  o.x = x;
+  o.y = y;
+  if (chance(s, 0.3)) log(s, o.name + ' was catapulted across the park. Landed fine. Mostly.');
+}
+
 // ---------- interactions ----------
 
 const LABELS = {
@@ -403,15 +495,18 @@ const LABELS = {
   argue: (a, b) => 'Arguing with ' + b.name,
   prank: (a, b, role) => role === 'by' ? 'Pranking ' + b.name : 'Pranked by ' + b.name,
   flirt: (a, b) => 'Flirting with ' + b.name,
-  gossip: (a, b, role, about) => 'Gossiping about ' + about
+  gossip: (a, b, role, about) => 'Gossiping about ' + about,
+  pitch: (a, b, role) => role === 'by' ? 'Pitching a scheme to ' + b.name : 'Hearing a pitch from ' + b.name
 };
 
 function startInteraction(s, o, t) {
   const r = getRel(o, t);
+  const mine = stallOf(s, o);
   let kind = 'chat', about = null;
-  const enemies = s.ogonz.filter(x => x !== o && x !== t && getRel(o, x) < 0 && home(x));
+  const enemies = s.ogonz.filter(x => x !== o && x !== t && getRel(o, x) < 0 && present(x));
   if (r <= -30) kind = 'argue';
   else if (has(o, 'prankster') && chance(s, 0.45)) kind = 'prank';
+  else if (mine && (has(o, 'hustler') || chance(s, 0.15)) && stage(t) !== 'child' && chance(s, 0.5)) kind = 'pitch';
   else if (has(o, 'gossip') && enemies.length && chance(s, 0.5)) kind = 'gossip';
   else if (canRomance(o, t) && r >= 40 && (has(o, 'romantic') || r >= 60 || o.partnerId === t.id)) kind = 'flirt';
 
@@ -421,6 +516,18 @@ function startInteraction(s, o, t) {
     addRel(o, victim, -6);
     addRel(t, victim, -8);
   }
+  if (kind === 'pitch') {
+    const sc = SCHEMES[mine.type];
+    const sold = t.cash >= sc.price * 2 && chance(s, has(t, 'gullible') ? 0.8 : has(t, 'hustler') ? 0.05 : 0.3);
+    if (sold) {
+      const amount = sc.price * 2;
+      t.cash -= amount;
+      o.cash += amount;
+      mine.earned += amount;
+      if (sc.scam) t.regrets.push({ ownerId: o.id, type: mine.type });
+      log(s, o.name + ' talked ' + t.name + ' into investing ' + money(amount) + ' in ' + sc.name.toLowerCase());
+    }
+  }
   for (const [a, b, role] of [[o, t, 'by'], [t, o, 'to']]) {
     if (a === t) endPlan(s, a);
     a.plan = { label: LABELS[kind](a, b, role, about), withId: b.id, long: true,
@@ -428,18 +535,18 @@ function startInteraction(s, o, t) {
   }
   if (kind === 'argue' && pairRel(o, t) <= -70 && (has(o, 'dramatic') || has(t, 'dramatic')) && chance(s, 0.3)) {
     log(s, pick(s, [
-      o.name + ' and ' + t.name + ' had a slap fight in the hallway',
-      o.name + ' threw a sandwich at ' + t.name,
-      o.name + ' challenged ' + t.name + ' to a dance-off. Nobody won.',
-      o.name + ' and ' + t.name + ' screamed at each other through the elevator doors'
+      o.name + ' and ' + t.name + ' had a slap fight by the porta-potty',
+      o.name + ' threw a hotdog at ' + t.name,
+      o.name + ' challenged ' + t.name + ' to a shopping cart joust',
+      o.name + ' and ' + t.name + ' screamed at each other across the trailer park'
     ]));
   }
   if (kind === 'prank' && chance(s, 0.25)) {
     log(s, pick(s, [
-      o.name + ' filled ' + t.name + "'s shoes with jelly",
-      o.name + ' replaced ' + t.name + "'s shampoo with mayonnaise",
-      o.name + ' taped a "kick me" sign on ' + t.name,
-      o.name + " hid a rubber chicken in " + t.name + "'s fridge"
+      o.name + " filled " + t.name + "'s boots with baked beans",
+      o.name + " parked a goose in " + t.name + "'s trailer",
+      o.name + ' taped a "KICK ME" sign on ' + t.name,
+      o.name + " replaced " + t.name + "'s hot sauce with ketchup"
     ]));
   }
 }
@@ -467,6 +574,10 @@ function interactEffects(s, o, t, st, dt) {
         o.needs.fun = clamp(o.needs.fun - 0.6 * dt);
         addRel(o, t, -0.8 * dt);
       }
+      break;
+    case 'pitch':
+      addRel(o, t, (st.role === 'by' ? 0.2 : has(o, 'gullible') ? 0.3 : -0.25) * dt);
+      o.needs.fun = clamp(o.needs.fun + 0.3 * dt);
       break;
     case 'flirt':
       addRel(o, t, 0.9 * dt);
