@@ -1,0 +1,40 @@
+# Builds the Fire TV viewer app. On main it also republishes the release
+# "tv-latest", whose ogonz-tv.apk the Firestick's Downloader app can fetch.
+name: Fire TV app
+
+on:
+  push:
+    paths: ["tv/**", ".github/workflows/tv.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.14.3
+      - name: Build APK
+        working-directory: tv
+        run: gradle --no-daemon assembleRelease
+      - run: cp tv/app/build/outputs/apk/release/app-release.apk ogonz-tv.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ogonz-tv
+          path: ogonz-tv.apk
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete tv-latest --yes --cleanup-tag || true
+          gh release create tv-latest ogonz-tv.apk --target "$GITHUB_SHA" --title "Ogonz for Fire TV" \
+            --notes "Sideload on a Fire TV: in the Downloader app open http://<your computer's address>:8080/apk (with npm start running), or this release's ogonz-tv.apk link."

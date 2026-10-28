@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ogonz</title>
+<style>
+  html, body { margin:0; height:100%; background:#15110d; color:#f1e6d2; font:4vh/1.4 monospace; }
+  main { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3vh; text-align:center; padding:0 8vw; box-sizing:border-box; }
+  h1 { margin:0; font-size:9vh; color:#ffb347; letter-spacing:.3vh; }
+  #status { min-height:3em; color:#c8b89f; max-width:60em; }
+  form { display:flex; gap:2vh; }
+  input, button { font:inherit; padding:1.2vh 2vh; border-radius:1vh; border:.4vh solid #7a5c3a; background:#2a2118; color:#fff; }
+  input { width:16em; }
+  input:focus, button:focus { outline:none; border-color:#ffd43b; background:#3b2e20; }
+  small { color:#8d7b63; font-size:2.6vh; }
+</style>
+</head>
+<body>
+<main>
+  <h1>OGONZ</h1>
+  <div id="status">Looking for the park on your Wi-Fi…</div>
+  <form id="form">
+    <input id="addr" placeholder="192.168.1.20" inputmode="url" autocomplete="off" spellcheck="false">
+    <button type="submit">Connect</button>
+    <button type="button" id="search">Search again</button>
+  </form>
+  <small>On the computer: run <b>npm start</b> in the ogonz folder. It shows the address to type here.<br>
+  Press ☰ (menu) on the remote any time to come back to this screen.</small>
+</main>
+<script>
+  const tv = window.OgonzTV;
+  window.setStatus = text => { document.getElementById('status').textContent = text; };
+  if (location.hash.length > 1) setStatus(decodeURIComponent(location.hash.slice(1)));
+  const addr = document.getElementById('addr');
+  if (tv) addr.value = tv.last().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  document.getElementById('form').addEventListener('submit', e => { e.preventDefault(); if (tv) tv.connect(addr.value); });
+  document.getElementById('search').addEventListener('click', () => { if (tv) tv.search(); });
+  document.getElementById('search').focus();
+</script>
+</body>
+</html>

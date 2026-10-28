@@ -1,5 +1,5 @@
 // Offline support: cache the app shell, serve it when the network is down.
-const CACHE = 'ogonz-v4';
+const CACHE = 'ogonz-v5';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'src/main.js', 'src/sim.js', 'src/core.js', 'src/life.js', 'src/fun.js', 'src/render.js', 'src/pixelfont.js', 'src/data.js'
@@ -18,7 +18,7 @@ self.addEventListener('activate', e => {
 // Network first so updates show up right away; cache when offline.
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then(r => {
