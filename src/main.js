@@ -1,11 +1,11 @@
 // App shell: game loop, viewing controls (pause / speed), side panel, saving.
 // Ogonz plays itself; there is no other input.
 
-import { WORLD, NEEDS, NEED_LABELS, WEEKDAYS } from './data.js';
+import { WORLD, NEEDS, NEED_LABELS, WEEKDAYS, TRAITS } from './data.js';
 import * as sim from './sim.js';
 import { draw } from './render.js';
 
-const SAVE_KEY = 'ogonz-save-v2';
+const SAVE_KEY = 'ogonz-save-v3';
 const SPOTLIGHT_SECONDS = 15;
 const $ = id => document.getElementById(id);
 const canvas = $('view');
@@ -94,7 +94,7 @@ function meter(get) {
 
 // The spotlight moves to the next Ogon at home every few seconds.
 function updateSpotlight(now) {
-  const home = s.ogonz.filter(o => !o.away);
+  const home = s.ogonz.filter(o => !o.out);
   const pool = home.length ? home : s.ogonz;
   const current = sim.byId(s.ogonz, spotlightId);
   if (!current || now - spotlightSince > SPOTLIGHT_SECONDS * 1000) {
@@ -106,7 +106,7 @@ function updateSpotlight(now) {
 
 function renderPanel() {
   const spot = sim.byId(s.ogonz, spotlightId);
-  const key = s.ogonz.map(o => o.id + (o.partnerId ? 'p' : '')).join(',') + '|' + (spot ? spot.id : '');
+  const key = s.ogonz.map(o => o.id + o.home + (o.partnerId ? 'p' : '')).join(',') + '|' + (spot ? spot.id : '');
   if (key !== panelKey) {
     panelKey = key;
     updaters = [];
@@ -117,39 +117,63 @@ function renderPanel() {
 
 function panelContent(spot) {
   const out = [];
-  out.push(el('h2', {}, 'Household'));
-  const list = el('div', { class: 'list' });
-  for (const o of s.ogonz) {
-    list.append(el('div', { class: 'card' + (o === spot ? ' on' : '') },
-      el('span', { class: 'dot', style: 'background:' + o.color }),
-      el('span', { class: 'grow' },
-        el('strong', {}, o.name), ' ', text(() => Math.floor(o.age) + (o.partnerId ? ' ♥' : ''), 'muted'),
-        el('br'), text(() => sim.activityLabel(o), 'muted')),
-      el('span', { style: 'width:4rem' }, meter(() => sim.mood(o)))));
-  }
-  out.push(list);
 
   if (spot) {
-    out.push(el('h3', {}, 'Spotlight · ' + spot.name));
+    const apt = sim.room(spot.home);
+    out.push(el('h2', {}, spot.name));
     out.push(el('div', { class: 'muted' }, text(() => {
-      const partner = sim.byId(s.ogonz, spot.partnerId);
       const st = sim.stage(spot);
-      const role = spot.job ? spot.job.title : st === 'elder' ? 'Retired' : st === 'child' ? 'Little one' : 'Looking for work';
-      return Math.floor(spot.age) + ' years old · ' + role + (partner ? ' · with ' + partner.name : '');
+      const role = spot.job ? spot.job.title : st === 'elder' ? 'Retired' : st === 'child' ? 'Little one' : 'Between jobs';
+      return Math.floor(spot.age) + ' · ' + spot.traits.map(t => TRAITS[t]).join(', ') + ' · ' + role + ' · ' + apt.name;
     })));
-    const needs = el('div', { class: 'needs', style: 'margin-top:.5rem' });
+    out.push(el('div', { class: 'now' }, text(() => sim.activityLabel(s, spot))));
+    const needs = el('div', { class: 'needs' });
     for (const n of NEEDS) needs.append(el('span', {}, NEED_LABELS[n]), meter(() => spot.needs[n]));
     out.push(needs);
-    const others = s.ogonz.filter(o => o !== spot);
-    if (others.length) {
-      out.push(el('div', { class: 'muted', style: 'margin-top:.5rem' },
-        text(() => others.map(o => o.name + ': ' + relLabel(spot, o)).join(' · '))));
-    }
+    out.push(el('h3', {}, 'Feelings'));
+    out.push(live(el('ul', { class: 'rels' }), n => {
+      const rows = s.ogonz.filter(o => o !== spot)
+        .map(o => ({ o, v: sim.pairRel(spot, o), label: sim.relLabel(s, spot, o) }))
+        .filter(r => r.label !== 'Stranger')
+        .sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 5);
+      const key = rows.map(r => r.o.id + r.label).join();
+      if (n.dataset.key === key) return;
+      n.dataset.key = key;
+      n.replaceChildren(...(rows.length ? rows.map(r => el('li', {},
+        el('span', { class: 'dot', style: 'background:' + r.o.color }), r.o.name + ' ',
+        el('span', { class: 'tag ' + tagClass(r.label) }, r.label))) : [el('li', { class: 'muted' }, 'Keeps to themselves')]));
+    }));
   }
+
+  out.push(el('h3', {}, 'Gossip'));
+  out.push(live(el('div', { class: 'muted' }), n => {
+    let love = null, feud = null;
+    for (const a of s.ogonz) {
+      for (const b of s.ogonz) {
+        if (a.id >= b.id) continue;
+        const v = sim.pairRel(a, b);
+        if (a.partnerId === b.id && (!love || v > love.v)) love = { a, b, v };
+        if (!feud || v < feud.v) feud = { a, b, v };
+      }
+    }
+    const t = [love ? '♥ ' + love.a.name + ' & ' + love.b.name : 'Nobody is in love (yet)',
+      feud && feud.v < -15 ? '⚔ ' + feud.a.name + ' vs ' + feud.b.name + ' (' + sim.relLabel(s, feud.a, feud.b) + ')'
+        : 'No feuds. Suspicious.'].join('  ·  ');
+    if (n.textContent !== t) n.textContent = t;
+  }));
+
+  out.push(el('h3', {}, 'Residents · ' + s.ogonz.length));
+  const chips = el('div', { class: 'chips' });
+  for (const o of s.ogonz) {
+    chips.append(el('span', { class: 'chip' + (o === spot ? ' on' : '') },
+      live(el('span', { class: 'dot' }), d => { d.style.background = `hsl(${Math.round(sim.mood(o) * 1.2)}, 70%, 50%)`; }),
+      o.name, el('span', { class: 'muted' }, ' ' + o.home)));
+  }
+  out.push(chips);
 
   out.push(el('h3', {}, 'News'));
   out.push(live(el('ul', { class: 'log' }), n => {
-    const items = s.log.slice(-8).reverse();
+    const items = s.log.slice(-10).reverse();
     const key = items.map(l => l.t + l.text).join('\n');
     if (n.dataset.key !== key) {
       n.dataset.key = key;
@@ -159,22 +183,18 @@ function panelContent(spot) {
   return out;
 }
 
-function relLabel(a, b) {
-  if (a.partnerId === b.id) return 'Partner';
-  if (a.parents.includes(b.id)) return 'Parent';
-  if (b.parents.includes(a.id)) return 'Child';
-  const v = a.rel[b.id] || 0;
-  if (v >= 60) return 'Best friend';
-  if (v >= 30) return 'Friend';
-  if (v >= 10) return 'Acquaintance';
-  return 'Stranger';
+function tagClass(label) {
+  if (['In love', 'Crush'].includes(label)) return 'love';
+  if (['Best friend', 'Friend', 'Parent', 'Child'].includes(label)) return 'good';
+  if (['Rival', 'Enemy', 'Nemesis'].includes(label)) return 'bad';
+  return '';
 }
 
 function updateBar() {
   const c = sim.clock(s);
   $('clock').textContent = 'Day ' + (c.day + 1) + ' · ' + WEEKDAYS[c.weekday] + ' ' +
     String(c.hour).padStart(2, '0') + ':' + String(c.minute).padStart(2, '0');
-  $('money').textContent = '§' + Math.floor(s.money).toLocaleString();
+  $('money').textContent = s.ogonz.length + ' residents';
 }
 
 // ---------- loop ----------
