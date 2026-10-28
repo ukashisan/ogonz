@@ -18,6 +18,15 @@ export const CLIMB_MINUTES = 3;
 export const MAX_OGONZ = 6;
 export const START_MONEY = 1500;
 
+// Life: everyone ages this many years per game day.
+export const YEARS_PER_DAY = 1;
+export const SCHOOL_AGE = 6;
+export const ADULT_AGE = 18;
+export const ELDER_AGE = 64;
+export const SCHOOL = { title: 'School', start: 8, end: 15, pay: 0 };
+export const DAILY_BILLS = 100;     // per Ogon
+export const PENSION = 70;          // per elder per day
+
 export const NEEDS = ['hunger', 'energy', 'bladder', 'hygiene', 'fun', 'social'];
 export const NEED_LABELS = {
   hunger: 'Hunger', energy: 'Energy', bladder: 'Bladder',

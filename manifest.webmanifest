@@ -1,7 +1,7 @@
 {
   "name": "Ogonz",
   "short_name": "Ogonz",
-  "description": "A life sim. Look after a household of Ogonz.",
+  "description": "A life sim that plays itself. Watch a household of Ogonz live their lives.",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

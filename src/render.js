@@ -1,7 +1,7 @@
 // Draws the side-view house and its Ogonz onto a 2D canvas in world units.
 
 import { WORLD, FLOORS, FLOOR_H, HOUSE, STAIRS, DOOR_X, EXIT_X, CATALOG } from './data.js';
-import { clock, mood, isSleeping, byId } from './sim.js';
+import { clock, mood, isSleeping, byId, stage } from './sim.js';
 
 const ROOF_Y = FLOORS[1] - FLOOR_H;
 const WALLPAPER = ['#f3e9d2', '#e3eef5'];
@@ -18,24 +18,10 @@ export function draw(ctx, s, view) {
   drawGround(ctx);
   drawHouse(ctx, c.hourF);
 
-  for (const obj of s.objects) drawObject(ctx, obj.type, obj.x, FLOORS[obj.floor], 1, obj.user !== null);
-  if (view.ghost) {
-    drawObject(ctx, view.ghost.type, view.ghost.x, FLOORS[view.ghost.floor], 0.55, false);
-    if (!view.ghost.ok) {
-      const cat = CATALOG[view.ghost.type];
-      ctx.fillStyle = 'rgba(255,60,60,0.35)';
-      ctx.fillRect(view.ghost.x - cat.w / 2, FLOORS[view.ghost.floor] - cat.h, cat.w, cat.h);
-    }
+  for (const obj of s.objects) {
+    drawObject(ctx, obj.type, obj.x, FLOORS[obj.floor], 1, obj.user !== null);
+    if (obj.broken) drawBroken(ctx, obj, view.time);
   }
-  if (view.cursorId) {
-    const obj = byId(s.objects, view.cursorId);
-    if (obj) outlineObject(ctx, obj, '#ffd43b');
-  }
-  if (view.sellId) {
-    const obj = byId(s.objects, view.sellId);
-    if (obj) outlineObject(ctx, obj, '#ff6b6b');
-  }
-
   for (const o of s.ogonz) if (!o.away) drawOgon(ctx, s, o, o.id === view.selectedId, view.time);
 }
 
@@ -195,13 +181,19 @@ export function drawObject(ctx, type, x, base, alpha, inUse) {
   ctx.restore();
 }
 
-function outlineObject(ctx, obj, color) {
+// Broken furniture: darkened, with a puff of smoke.
+function drawBroken(ctx, obj, time) {
   const cat = CATALOG[obj.type];
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 3]);
-  ctx.strokeRect(obj.x - cat.w / 2 - 3, FLOORS[obj.floor] - cat.h - 3, cat.w + 6, cat.h + 6);
-  ctx.setLineDash([]);
+  const base = FLOORS[obj.floor];
+  ctx.fillStyle = 'rgba(30,30,30,0.35)';
+  ctx.fillRect(obj.x - cat.w / 2, base - cat.h, cat.w, cat.h);
+  for (let i = 0; i < 3; i++) {
+    const t = (time * 0.6 + i / 3) % 1;
+    ctx.fillStyle = `rgba(120,120,120,${0.6 * (1 - t)})`;
+    ctx.beginPath();
+    ctx.arc(obj.x + Math.sin(t * 6 + i) * 6, base - cat.h - 4 - t * 30, 4 + t * 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function box(ctx, x, y, w, h, fill, stroke) {
@@ -218,11 +210,18 @@ function box(ctx, x, y, w, h, fill, stroke) {
 
 export const OGON_SCALE = 1.3;
 
+// Children are smaller, toddlers smaller still.
+function sizeFor(o) {
+  if (o.age < 6) return 0.55;
+  if (o.age < 18) return 0.55 + (o.age - 6) / 12 * 0.4;
+  return 1;
+}
+
 function drawOgon(ctx, s, o, selected, time) {
   const pos = ogonPosition(o);
   ctx.save();
   ctx.translate(pos.x, pos.y);
-  ctx.scale(OGON_SCALE, OGON_SCALE);
+  ctx.scale(OGON_SCALE * sizeFor(o), OGON_SCALE * sizeFor(o));
   drawOgonAt(ctx, s, o, selected, time, 0, 0);
   ctx.restore();
 }
@@ -262,6 +261,11 @@ function drawOgonAt(ctx, s, o, selected, time, x, y) {
   ctx.beginPath();
   ctx.arc(x, y - 34 - bob, 8, 0, Math.PI * 2);
   ctx.fill();
+  // Hair: grey for elders.
+  ctx.fillStyle = stage(o) === 'elder' ? '#ced4da' : '#5c3d2e';
+  ctx.beginPath();
+  ctx.arc(x, y - 35 - bob, 8, Math.PI * 1.05, Math.PI * 1.95);
+  ctx.fill();
   // Eyes
   ctx.fillStyle = '#212529';
   if (sleeping) {
@@ -291,7 +295,10 @@ function drawOgonAt(ctx, s, o, selected, time, x, y) {
   ctx.textAlign = 'left';
   ctx.fillStyle = '#212529';
   if (sleeping) ctx.fillText(Math.floor(time * 2) % 2 ? 'z Z' : 'Z z', x + 8, headTop - 4);
-  else if (step && step.type === 'chatting') bubble(ctx, x + 6, headTop - 10, Math.floor(time * 3) % 2 ? '…' : '!');
+  else if (step && step.type === 'chatting') {
+    const flirting = o.partnerId === step.withId;
+    bubble(ctx, x + 6, headTop - 10, flirting ? '♥' : Math.floor(time * 3) % 2 ? '…' : '!', flirting ? '#e64980' : '#212529');
+  }
 
   // Name
   ctx.font = (selected ? 'bold ' : '') + '11px system-ui, sans-serif';
@@ -303,11 +310,11 @@ function drawOgonAt(ctx, s, o, selected, time, x, y) {
   ctx.fillText(o.name, x, y + 12);
 }
 
-function bubble(ctx, x, y, text) {
+function bubble(ctx, x, y, text, color = '#212529') {
   ctx.fillStyle = '#fff';
   roundRect(ctx, x, y - 12, 16, 13, 5);
   ctx.fill();
-  ctx.fillStyle = '#212529';
+  ctx.fillStyle = color;
   ctx.textAlign = 'center';
   ctx.fillText(text, x + 8, y - 2);
 }

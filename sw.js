@@ -1,5 +1,5 @@
 // Offline support: cache the app shell, serve it when the network is down.
-const CACHE = 'ogonz-v1';
+const CACHE = 'ogonz-v2';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
   'src/main.js', 'src/sim.js', 'src/render.js', 'src/data.js'
