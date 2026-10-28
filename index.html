@@ -26,10 +26,11 @@
   </div>
 </header>
 <main id="layout">
-  <div id="stage"><canvas id="view"></canvas></div>
+  <div id="stage"><canvas id="view" tabindex="0" aria-label="House. Arrow keys pick furniture and Ogonz, Enter gives an order."></canvas></div>
   <section id="panel" aria-live="polite"></section>
 </main>
 <div id="toast" role="status" hidden></div>
+<div id="rotate"><div class="phone"></div><strong>Turn your device sideways</strong><span class="muted">Ogonz plays in landscape.</span></div>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

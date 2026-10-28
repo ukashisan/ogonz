@@ -1,4 +1,5 @@
-// End-to-end check in headless Chromium on phone, tablet and desktop sizes:
+// End-to-end check in headless Chromium on landscape phone, tablet, desktop
+// and TV sizes:
 // loads the game, gives an order by tapping furniture, buys an item, checks
 // time passes, and that the save survives a reload (online and offline).
 // Usage: node tests/smoke.mjs   (SHOTS=dir to save screenshots)
@@ -27,9 +28,10 @@ const server = createServer(async (req, res) => {
 const url = 'http://localhost:' + server.address().port + '/';
 
 const VIEWPORTS = {
-  phone: devices['iPhone 13'],
-  tablet: { ...devices['iPad (gen 7) landscape'] },
-  desktop: { viewport: { width: 1280, height: 800 } }
+  phone: devices['iPhone 13 landscape'],
+  tablet: devices['iPad (gen 7) landscape'],
+  desktop: { viewport: { width: 1280, height: 800 } },
+  tv: { viewport: { width: 1920, height: 1080 } }
 };
 
 const fail = msg => { throw new Error(msg); };
@@ -66,18 +68,23 @@ try {
     });
 
     // Order the selected Ogon to use the TV (ground floor, x=420) by tapping it.
+    // Pause and move everyone upstairs first so nobody stands in front of it.
+    await page.evaluate(() => {
+      window.__ogonz.setSpeed(0);
+      const s = window.__ogonz.state;
+      s.ogonz.forEach((o, i) => { o.away = false; o.plan = null; o.queue = []; o.climb = null; o.floor = 1; o.x = 300 + i * 60; });
+    });
     const before = await state();
     await tapWorld(page, 420, 340, touch);
     const afterOrder = await state();
     const idx = (await page.evaluate(() => window.__ogonz.state.ogonz.findIndex(o => o.id === window.__ogonz.ui.selectedId)));
-    if (afterOrder.labels[idx] !== 'Watch TV' && afterOrder.queue[idx] === before.queue[idx]) {
-      // The order is queued; give the sim a moment to start it.
-      await page.waitForTimeout(300);
-      const again = await state();
-      if (again.labels[idx] !== 'Watch TV') fail(name + ': order not taken, doing ' + again.labels[idx]);
-    }
+    if (afterOrder.queue[idx] !== 1) fail(name + ': tapping the TV did not queue an order');
 
     // Time passes at top speed.
+    await page.evaluate(() => window.__ogonz.setSpeed(1));
+    await page.waitForTimeout(300);
+    const started = await state();
+    if (started.labels[idx] !== 'Watch TV' && started.queue[idx] === 0) fail(name + ': order lost, doing ' + started.labels[idx]);
     await page.click('#speeds button[data-speed="15"]');
     await page.waitForTimeout(1500);
     const later = await state();
@@ -97,6 +104,20 @@ try {
     await page.click('#panel button:text-is("Add Ogon")');
     if ((await state()).ogonz !== before.ogonz + 1) fail(name + ': add Ogon failed');
 
+    // Keyboard / TV remote: focus the house, highlight furniture, order it.
+    if (!touch) {
+      await page.evaluate(() => { const s = window.__ogonz.state; for (const o of s.ogonz) { o.away = false; o.queue = []; } });
+      await page.focus('#view');
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('Enter');
+      const q = await page.evaluate(() => {
+        const s = window.__ogonz.state, o = s.ogonz.find(x => x.id === window.__ogonz.ui.selectedId);
+        return o.queue.length + (o.plan && o.plan.player ? 1 : 0);
+      });
+      if (!q) fail(name + ': keyboard order not given');
+    }
+
     await page.evaluate(() => window.__ogonz.save());
     if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/' + name + '.png' });
 
@@ -115,6 +136,13 @@ try {
     console.log(name + ' ok');
     await context.close();
   }
+  // Held upright: the game asks to be turned sideways.
+  const context = await browser.newContext(devices['iPhone 13']);
+  const page = await context.newPage();
+  await page.goto(url);
+  if (!(await page.isVisible('#rotate'))) fail('portrait phone: no rotate prompt');
+  await context.close();
+  console.log('portrait prompt ok');
   console.log('smoke test passed');
 } finally {
   await browser.close();

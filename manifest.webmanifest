@@ -4,7 +4,8 @@
   "description": "A life sim. Look after a household of Ogonz.",
   "start_url": "./",
   "scope": "./",
-  "display": "standalone",
+  "display": "fullscreen",
+  "orientation": "landscape",
   "background_color": "#1b1f2a",
   "theme_color": "#1b1f2a",
   "icons": [

@@ -27,6 +27,10 @@ export function draw(ctx, s, view) {
       ctx.fillRect(view.ghost.x - cat.w / 2, FLOORS[view.ghost.floor] - cat.h, cat.w, cat.h);
     }
   }
+  if (view.cursorId) {
+    const obj = byId(s.objects, view.cursorId);
+    if (obj) outlineObject(ctx, obj, '#ffd43b');
+  }
   if (view.sellId) {
     const obj = byId(s.objects, view.sellId);
     if (obj) outlineObject(ctx, obj, '#ff6b6b');

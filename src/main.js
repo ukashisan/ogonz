@@ -16,7 +16,8 @@ const ui = {
   mode: 'live',        // 'live' | 'buy'
   buyType: null,       // catalog key being placed
   ghost: null,
-  sellId: null
+  sellId: null,
+  cursorId: null       // furniture highlighted by keyboard / TV remote
 };
 
 // ---------- saving ----------
@@ -101,16 +102,18 @@ canvas.addEventListener('pointerdown', e => {
     return;
   }
   const obj = hitObject(p);
-  if (obj) {
-    const cat = CATALOG[obj.type];
-    const sel = sim.byId(s.ogonz, ui.selectedId);
-    if (!cat.verb) return toast(cat.name + ' is decoration');
-    if (!sel) return toast('Tap an Ogon first');
-    if (sel.away) return toast(sel.name + ' is at work');
-    sim.commandUse(s, sel.id, obj.id);
-    toast(sel.name + ': ' + cat.verb);
-  }
+  if (obj) orderUse(obj);
 });
+
+function orderUse(obj) {
+  const cat = CATALOG[obj.type];
+  const sel = sim.byId(s.ogonz, ui.selectedId);
+  if (!cat.verb) return toast(cat.name + ' is decoration');
+  if (!sel) return toast('Tap an Ogon first');
+  if (sel.away) return toast(sel.name + ' is at work');
+  sim.commandUse(s, sel.id, obj.id);
+  toast(sel.name + ': ' + cat.verb);
+}
 
 function buyTap(p) {
   if (ui.buyType) {
@@ -132,10 +135,53 @@ function buyTap(p) {
 
 addEventListener('keydown', e => {
   if (e.target.closest('input, textarea')) return;
+  if (e.target === canvas && canvasKey(e)) { e.preventDefault(); return; }
+  if (e.target.closest('button')) return;      // let Space/Enter press the button
   const keys = { ' ': speed ? 0 : 1, '1': 1, '2': 4, '3': 15 };
   if (e.key in keys) { e.preventDefault(); setSpeed(keys[e.key]); }
   if (e.key === 'Escape') { ui.buyType = null; ui.ghost = null; ui.sellId = null; }
 });
+
+// Keyboard / TV remote on the house: arrows move a highlight over furniture
+// (or the placement preview in buy mode), Enter acts on it.
+function canvasKey(e) {
+  if (ui.mode === 'buy' && ui.buyType) {
+    const g = ui.ghost || { floor: 0, x: 400 };
+    const moves = { ArrowLeft: [0, -10], ArrowRight: [0, 10], ArrowUp: [1, 0], ArrowDown: [-1, 0] };
+    if (moves[e.key]) {
+      const floor = Math.max(0, Math.min(1, g.floor + moves[e.key][0]));
+      const x = Math.max(0, Math.min(WORLD.w, g.x + moves[e.key][1]));
+      ui.ghost = { type: ui.buyType, floor, x, ok: sim.canPlace(s, ui.buyType, floor, x) };
+      return true;
+    }
+    if (e.key === 'Enter') { buyTap({ x: g.x, y: FLOORS[g.floor] - 10 }); return true; }
+    return false;
+  }
+
+  const items = s.objects.filter(o => ui.mode === 'buy' || CATALOG[o.type].verb)
+    .sort((a, b) => b.floor - a.floor || a.x - b.x);
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (!items.length) return true;
+    const i = items.findIndex(o => o.id === ui.cursorId);
+    const next = i < 0 ? 0 : (i + (e.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+    ui.cursorId = items[next].id;
+    return true;
+  }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (ui.mode === 'buy' || !s.ogonz.length) return true;
+    const i = s.ogonz.findIndex(o => o.id === ui.selectedId);
+    ui.selectedId = s.ogonz[(i + (e.key === 'ArrowDown' ? 1 : -1) + s.ogonz.length) % s.ogonz.length].id;
+    return true;
+  }
+  if (e.key === 'Enter') {
+    const obj = sim.byId(s.objects, ui.cursorId);
+    if (!obj) return true;
+    if (ui.mode === 'buy') ui.sellId = obj.id;
+    else orderUse(obj);
+    return true;
+  }
+  return false;
+}
 
 // ---------- top bar ----------
 
@@ -197,8 +243,8 @@ function renderPanel() {
 
 function livePanel(sel) {
   const out = [];
-  out.push(el('div', { class: 'row' },
-    el('h2', { class: 'grow' }, 'Household'),
+  out.push(el('h2', {}, 'Household'));
+  out.push(el('div', { class: 'row actions' },
     el('button', { onclick: () => { ui.mode = 'buy'; ui.buyType = null; ui.sellId = null; } }, 'Buy'),
     el('button', {
       disabled: s.ogonz.length >= MAX_OGONZ,
@@ -211,7 +257,7 @@ function livePanel(sel) {
       el('span', { class: 'dot', style: 'background:' + o.color }),
       el('span', { class: 'grow' }, el('strong', {}, o.name), ' ',
         live(el('span', { class: 'muted' }), n => { n.textContent = sim.activityLabel(o); })),
-      el('span', { style: 'width:60px' }, meter(() => sim.mood(o))));
+      el('span', { style: 'width:4rem' }, meter(() => sim.mood(o))));
     cards.append(b);
   }
   out.push(cards);
@@ -222,7 +268,7 @@ function livePanel(sel) {
       n.textContent = 'Works ' + hourLabel(sel.job.start) + '–' + hourLabel(sel.job.end) +
         ' Mon–Fri, §' + sel.job.pay + '/day. Now: ' + sim.activityLabel(sel);
     }));
-    const needs = el('div', { class: 'needs', style: 'margin-top:8px' });
+    const needs = el('div', { class: 'needs', style: 'margin-top:.5rem' });
     for (const n of NEEDS) needs.append(el('span', {}, NEED_LABELS[n]), meter(() => sel.needs[n]));
     out.push(needs);
 
@@ -258,8 +304,12 @@ function livePanel(sel) {
       n.replaceChildren(...s.log.slice(-5).reverse().map(l => el('li', {}, l.text)));
     }
   }));
-  out.push(el('div', { class: 'row', style: 'margin-top:16px' },
+  out.push(el('div', { class: 'row', style: 'margin-top:1rem' },
     el('button', { class: 'danger', onclick: newGame }, 'New game')));
+  out.push(el('p', { class: 'keys' },
+    'Keyboard / remote: focus the house, then ', el('kbd', {}, '←→'), ' furniture, ',
+    el('kbd', {}, '↑↓'), ' Ogon, ', el('kbd', {}, 'Enter'), ' order. ',
+    el('kbd', {}, 'Space'), ' pause, ', el('kbd', {}, '1'), el('kbd', {}, '2'), el('kbd', {}, '3'), ' speed.'));
   return out;
 }
 
@@ -340,7 +390,8 @@ function frame(now) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(fit.dpr * fit.scale, 0, 0, fit.dpr * fit.scale, fit.dpr * fit.ox, fit.dpr * fit.oy);
   draw(ctx, s, { selectedId: ui.selectedId, ghost: ui.mode === 'buy' ? ui.ghost : null,
-    sellId: ui.mode === 'buy' ? ui.sellId : null, time: now / 1000 });
+    sellId: ui.mode === 'buy' ? ui.sellId : null, time: now / 1000,
+    cursorId: document.activeElement === canvas ? ui.cursorId : null });
 
   updateBar();
   renderPanel();
