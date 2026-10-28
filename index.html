@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Ogonz">
+<meta name="theme-color" content="#1b1f2a">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<title>Ogonz</title>
+</head>
+<body>
+<header id="bar">
+  <div id="clock">Mon 07:00</div>
+  <div id="money">§0</div>
+  <div id="speeds" role="group" aria-label="Game speed">
+    <button data-speed="0" aria-label="Pause">❚❚</button>
+    <button data-speed="1" aria-label="Normal speed">▶</button>
+    <button data-speed="4" aria-label="Fast">▶▶</button>
+    <button data-speed="15" aria-label="Fastest">▶▶▶</button>
+  </div>
+</header>
+<main id="layout">
+  <div id="stage"><canvas id="view"></canvas></div>
+  <section id="panel" aria-live="polite"></section>
+</main>
+<div id="toast" role="status" hidden></div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

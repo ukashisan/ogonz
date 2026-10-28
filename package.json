@@ -1,0 +1,9 @@
+{
+  "name": "ogonz",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "smoke": "node tests/smoke.mjs"
+  }
+}
