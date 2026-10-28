@@ -1,40 +1,41 @@
 // Ogonz simulation: public API. The rules live in core.js (needs, autonomy,
-// interactions), life.js (daily life events) and fun.js (silly events).
+// schemes, interactions), life.js (daily life) and fun.js (silly events).
 
-import { ROOMS, APARTMENT_LAYOUT, COMMON_LAYOUT } from './data.js';
+import { TRAILER_SPOTS, TRAILER_COLORS, AMENITIES } from './data.js';
 import { tickResident, clock, log } from './core.js';
 import { dailyLife, moveIn, addResident } from './life.js';
 import { maybeStartEvent, updateEvents } from './fun.js';
 
 export {
-  clock, mood, stage, byId, room, isSleeping, activityLabel, relLabel, pairRel, getRel,
-  compat, statusActive, eventActive
+  clock, mood, stage, byId, isSleeping, isTending, activityLabel, relLabel, pairRel, getRel, compat,
+  statusActive, eventActive, schemeOpen, stallOf, trailerOf, doorOf, money, visible
 } from './core.js';
-export { residentsOf } from './life.js';
+export { residentsOf, emptyTrailers } from './life.js';
 export { EVENTS } from './fun.js';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 const SUBSTEP = 0.25;
 
 export function newGame(seed = Date.now()) {
   const s = {
     version: SAVE_VERSION, rng: seed | 0, minutes: 7 * 60, nextId: 1,
-    objects: [], ogonz: [], events: [], log: [], pairs: {}, lastDay: 0, lastHour: 7
+    trailers: [], amenities: [], stalls: [], ogonz: [], events: [], log: [], pairs: {},
+    lastDay: 0, lastHour: 7
   };
-  for (const r of ROOMS) {
-    const layout = r.common ? COMMON_LAYOUT[r.id] : APARTMENT_LAYOUT;
-    for (const [type, dx] of layout) {
-      s.objects.push({ id: s.nextId++, type, room: r.id, floor: r.floor, x: r.l + dx, user: null });
-    }
-  }
-  // Four households to start; two apartments stay empty for newcomers.
-  moveIn(s, '1A');
-  moveIn(s, '2B');
-  moveIn(s, '3A');
-  const parents = moveIn(s, '3B');
-  const kid = addResident(s, { age: 8, homeId: '3B', parents: parents.map(x => x.id) });
+  TRAILER_SPOTS.forEach((p, i) => {
+    s.trailers.push({ id: s.nextId++, x: p.x, y: p.y, color: TRAILER_COLORS[i % TRAILER_COLORS.length],
+      rust: (i * 7919) % 5, dish: i % 3 === 0, ac: i % 2 === 0 });
+  });
+  for (const a of AMENITIES) s.amenities.push({ id: s.nextId++, ...a, users: [] });
+
+  // Seven households to start; the rest of the trailers wait for newcomers.
+  const homes = s.trailers;
+  for (const i of [0, 2, 3, 6, 9, 10]) moveIn(s, homes[i].id);
+  const parents = moveIn(s, homes[7].id);
+  const kid = addResident(s, { age: 9, homeId: homes[7].id, parents: parents.map(x => x.id) });
   for (const x of parents) x.rel[kid.id] = 60;
-  log(s, 'Welcome to the Ogonz apartments');
+  s.log = [];
+  log(s, 'Welcome to Sunset Trailer Haven, where everyone is one scheme away from riches');
   return s;
 }
 
@@ -59,7 +60,7 @@ export function serialize(s) {
 
 export function deserialize(json) {
   const s = JSON.parse(json);
-  if (!s || s.version !== SAVE_VERSION || !Array.isArray(s.ogonz) || !Array.isArray(s.objects)) {
+  if (!s || s.version !== SAVE_VERSION || !Array.isArray(s.ogonz) || !Array.isArray(s.trailers)) {
     throw new Error('Unsupported save');
   }
   return s;

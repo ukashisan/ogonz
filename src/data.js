@@ -1,43 +1,75 @@
-// Static data: building layout, needs, furniture, personalities, names, jobs.
-// World units are pixels in a 1200x720 side view; the canvas scales them.
+// Static data for Sunset Trailer Haven: map layout, needs, amenities,
+// get-rich-quick schemes, personalities, names.
+// World units are pixels of a 640x360 pixel-art map, scaled up on screen.
 
-export const WORLD = { w: 1200, h: 720 };
+export const WORLD = { w: 640, h: 360 };
+export const PARK = { left: 8, right: 632, top: 44, bottom: 340 };
+export const GATE = { x: 320, y: 352 };           // entrance arch; residents leave the park here
 
-// Feet baseline for each floor (0 = ground floor).
-export const FLOOR_H = 140;
-export const FLOORS = [660, 520, 380, 240];
-export const ROOF_Y = FLOORS[3] - FLOOR_H;
-export const BUILDING = { left: 80, right: 1160 };
-export const ELEVATOR = { x: 620, w: 64 };
-export const EXIT_X = 30;              // bus stop, where residents leave the building
-export const DOOR_X = BUILDING.left;
-
-// Rooms. Apartments are on floors 1-3; the ground floor is shared.
-const LEFT = { l: BUILDING.left + 10, r: ELEVATOR.x - ELEVATOR.w / 2 - 8 };
-const RIGHT = { l: ELEVATOR.x + ELEVATOR.w / 2 + 8, r: BUILDING.right - 10 };
-export const ROOMS = [
-  { id: 'cafe', name: 'Café', floor: 0, ...LEFT, common: true, wall: '#f6e3c8' },
-  { id: 'party', name: 'Party room', floor: 0, ...RIGHT, common: true, wall: '#2d2347' }
+// Homes. x, y = middle of the trailer's front edge (where it meets the ground).
+export const TRAILER = { w: 54, face: 16, roof: 12 };
+export const TRAILER_SPOTS = [
+  { x: 48, y: 84 }, { x: 140, y: 76 }, { x: 430, y: 76 }, { x: 520, y: 84 }, { x: 596, y: 140 },
+  { x: 44, y: 150 }, { x: 44, y: 222 }, { x: 160, y: 300 }, { x: 410, y: 312 }, { x: 600, y: 222 },
+  { x: 250, y: 236 }, { x: 520, y: 340 }
 ];
-const WALLS = ['#f3e9d2', '#e3eef5', '#e8f4e1', '#f7e1e6', '#ece4f7', '#fff2cc'];
-for (let f = 1; f <= 3; f++) {
-  ROOMS.push({ id: f + 'A', name: 'Apt ' + f + 'A', floor: f, ...LEFT, wall: WALLS[(f - 1) * 2] });
-  ROOMS.push({ id: f + 'B', name: 'Apt ' + f + 'B', floor: f, ...RIGHT, wall: WALLS[(f - 1) * 2 + 1] });
-}
-export const APARTMENTS = ROOMS.filter(r => !r.common).map(r => r.id);
-export const MAX_PER_APARTMENT = 3;
+export const MAX_PER_TRAILER = 3;
+export const TRAILER_COLORS = ['#c9cfd6', '#e8d9b5', '#b5d6a7', '#f2a7b8', '#9fc5e8', '#c5a3d9',
+  '#f4b183', '#d9c27a', '#88b7b5', '#e6b0aa'];
 
-// Furniture placed in every room: [type, x offset from the room's left edge].
-export const APARTMENT_LAYOUT = [
-  ['toilet', 22], ['shower', 66], ['fridge', 114], ['tv', 168], ['bed', 252], ['bed', 346], ['crib', 428]
+// Shared things around the park. slots = how many can use it at once.
+export const AMENITIES = [
+  { type: 'bbq',     x: 196, y: 214, slots: 4, dy: 12, spread: 24 },
+  { type: 'hottub',  x: 300, y: 262, slots: 4, dy: -3, spread: 26 },
+  { type: 'potty',   x: 252, y: 316, slots: 1, dy: 4 },
+  { type: 'track',   x: 300, y: 158, slots: 4, dy: 34, spread: 40 },
+  { type: 'laundry', x: 470, y: 222, slots: 3, dy: 10, spread: 40 },
+  { type: 'snails',  x: 572, y: 290, slots: 3, dy: 26, spread: 50 },
+  { type: 'trampoline', x: 52, y: 322, slots: 1, dy: -2 },
+  { type: 'catapult', x: 102, y: 334, slots: 1, dy: 6 },
+  { type: 'podium',  x: 560, y: 186, slots: 0 }
 ];
-export const COMMON_LAYOUT = {
-  cafe: [['counter', 60], ['counter', 120], ['sofa', 230], ['arcade', 320], ['bookshelf', 400]],
-  party: [['toilet', 26], ['jukebox', 100], ['sofa', 200], ['plant', 290], ['arcade', 360], ['plant', 450]]
+export const AMENITY_INFO = {
+  bbq:        { name: 'BBQ',          verb: 'Grilling',          minutes: 35, gains: { hunger: 2.6, social: 0.6 } },
+  hottub:     { name: 'Hot tub',      verb: 'Soaking in the hot tub', minutes: 40, gains: { hygiene: 1.6, fun: 1 } },
+  potty:      { name: 'Porta-potty',  verb: 'Using the porta-potty', minutes: 8, gains: { bladder: 12 } },
+  track:      { name: 'Cart track',   verb: 'Racing shopping carts', minutes: 30, gains: { fun: 2 } },
+  laundry:    { name: 'Cats Laundry', verb: 'Doing laundry (cats help)', minutes: 30, gains: { hygiene: 2.2 } },
+  snails:     { name: 'Snail racing', verb: 'Betting on snails',  minutes: 30, gains: { fun: 1.6, social: 0.4 } },
+  trampoline: { name: 'Trampoline',   verb: 'Bouncing',          minutes: 15, gains: { fun: 2.4 } },
+  catapult:   { name: 'Catapult',     verb: 'Getting catapulted', minutes: 6, gains: { fun: 6 } },
+  podium:     { name: 'Seminar podium' }
 };
 
-export const WALK = 60;                 // px per game minute
-export const RIDE_MINUTES = 2;          // elevator, per floor
+// Things done inside your own trailer.
+export const INDOOR = {
+  eat:    { verb: 'Eating inside',        minutes: 30,  gains: { hunger: 3 } },
+  toilet: { verb: 'On the toilet',        minutes: 10,  gains: { bladder: 10 } },
+  shower: { verb: 'Showering (cold)',     minutes: 20,  gains: { hygiene: 5 } },
+  tv:     { verb: 'Watching TV inside',   minutes: 60,  gains: { fun: 1.3 } },
+  sleep:  { verb: 'Sleeping',             minutes: 600, gains: { energy: 0.21 }, sleep: true }
+};
+
+// Get-rich-quick schemes. Each adult runs one at a stall next to their trailer.
+// price: what a customer pays. scam: customers may later feel cheated.
+export const SCHEMES = {
+  lemonade: { name: 'Lemonade $20', sign: ['LEMONADE', '$20 A CUP'], price: 20, gains: { hunger: 25 } },
+  crypto:   { name: 'Crypto mine', sign: ['CRYPTO', 'MINE'], price: 30, gains: { fun: 10 }, scam: true },
+  pyramid:  { name: 'Pyramid scheme', sign: ['PYRAMID', '= PROFIT!!!'], price: 50, gains: { fun: 15 }, scam: true },
+  alien:    { name: 'Alien urine', sign: ['ALIEN URINE', '$100'], price: 100, gains: { fun: 20 }, scam: true },
+  oil:      { name: 'Oil well', sign: ['DIGGING FOR', 'OIL IN MY YARD'], price: 25, gains: { fun: 8 } },
+  air:      { name: 'Air for sale', sign: ['SELL', 'AIR'], price: 15, gains: { fun: 6 }, scam: true },
+  fish:     { name: 'Fish farm', sign: ['FISH FARM', 'FUTURE MILLIONS'], price: 20, gains: { hunger: 15 } },
+  worms:    { name: 'Worm farm', sign: ['WORMS', '$$$'], price: 10, gains: { fun: 5 } },
+  nft:      { name: 'NFT rocks', sign: ['NFT ROCKS', 'OWN THE ROCK'], price: 60, gains: { fun: 12 }, scam: true },
+  tonic:    { name: 'Hair tonic', sign: ['MIRACLE', 'HAIR TONIC'], price: 40, gains: { hygiene: 20 }, scam: true },
+  robot:    { name: 'Robot startup', sign: ['INVEST IN', 'MY ROBOT'], price: 50, gains: { fun: 12 }, scam: true },
+  tanning:  { name: 'Tanning bed', sign: ['TANNING', 'BED'], price: 15, gains: { fun: 8, energy: 10 } },
+  casino:   { name: 'Cart casino', sign: ['CART', 'CASINO'], price: 5, gains: { fun: 14 } }
+};
+export const SCHEME_HOURS = { start: 9, end: 18 };
+
+export const WALK = 14;                 // px per game minute
 export const CHAT_MINUTES = 20;
 
 export const NEEDS = ['hunger', 'energy', 'bladder', 'hygiene', 'fun', 'social'];
@@ -53,22 +85,6 @@ export const DECAY = {
   out:   { hunger: 0.1, energy: 0.07, bladder: 0, hygiene: 0.08, fun: 0.15, social: -0.05 }
 };
 
-// gains: need points per minute while using. minutes: max use time.
-export const CATALOG = {
-  fridge:    { name: 'Fridge',    w: 40, h: 70, verb: 'Eat',          minutes: 30,  gains: { hunger: 3 } },
-  counter:   { name: 'Café',      w: 50, h: 56, verb: 'Eat at the café', minutes: 30, gains: { hunger: 3, social: 0.3 } },
-  bed:       { name: 'Bed',       w: 84, h: 34, verb: 'Sleep',        minutes: 600, gains: { energy: 0.21 }, sleep: true },
-  crib:      { name: 'Kid bed',   w: 44, h: 30, verb: 'Sleep',        minutes: 600, gains: { energy: 0.25 }, sleep: true, kids: true },
-  toilet:    { name: 'Toilet',    w: 30, h: 36, verb: 'Use toilet',   minutes: 10,  gains: { bladder: 10 } },
-  shower:    { name: 'Shower',    w: 40, h: 90, verb: 'Shower',       minutes: 20,  gains: { hygiene: 5 } },
-  tv:        { name: 'TV',        w: 56, h: 44, verb: 'Watch TV',     minutes: 60,  gains: { fun: 1.5 } },
-  sofa:      { name: 'Sofa',      w: 74, h: 34, verb: 'Relax',        minutes: 45,  gains: { fun: 0.6, energy: 0.15 } },
-  bookshelf: { name: 'Bookshelf', w: 44, h: 80, verb: 'Read',         minutes: 60,  gains: { fun: 0.9 } },
-  arcade:    { name: 'Arcade',    w: 40, h: 76, verb: 'Play arcade',  minutes: 45,  gains: { fun: 1.8 } },
-  jukebox:   { name: 'Jukebox',   w: 40, h: 70, verb: 'Dance',        minutes: 40,  gains: { fun: 1.6, social: 0.4 } },
-  plant:     { name: 'Plant',     w: 24, h: 40 }
-};
-
 // Personalities. Each resident gets two.
 export const TRAITS = {
   cheerful:   'Cheerful',
@@ -77,7 +93,8 @@ export const TRAITS = {
   prankster:  'Prankster',
   dramatic:   'Dramatic',
   gossip:     'Gossip',
-  shy:        'Shy',
+  hustler:    'Hustler',
+  gullible:   'Gullible',
   sleepy:     'Sleepy',
   party:      'Party animal',
   conspiracy: 'Conspiracy theorist'
@@ -87,37 +104,28 @@ export const CHEMISTRY = {
   'cheerful+cheerful': 0.6, 'cheerful+grumpy': -0.7, 'grumpy+grumpy': 0.3, 'grumpy+prankster': -0.9,
   'grumpy+party': -0.6, 'romantic+romantic': 0.7, 'romantic+cheerful': 0.4, 'prankster+prankster': 0.8,
   'prankster+dramatic': -0.6, 'dramatic+dramatic': -0.4, 'dramatic+gossip': 0.5, 'gossip+gossip': 0.7,
-  'gossip+shy': -0.5, 'shy+shy': 0.5, 'shy+party': -0.5, 'sleepy+sleepy': 0.6, 'sleepy+party': -0.7,
-  'party+party': 0.8, 'party+cheerful': 0.5, 'conspiracy+conspiracy': 0.9, 'conspiracy+grumpy': 0.3,
-  'conspiracy+cheerful': -0.3, 'shy+romantic': 0.3, 'grumpy+sleepy': 0.4
+  'hustler+hustler': -0.6, 'hustler+gullible': 0.5, 'gullible+gullible': 0.6, 'hustler+grumpy': -0.4,
+  'sleepy+sleepy': 0.6, 'sleepy+party': -0.7, 'party+party': 0.8, 'party+cheerful': 0.5,
+  'conspiracy+conspiracy': 0.9, 'conspiracy+grumpy': 0.3, 'conspiracy+cheerful': -0.3,
+  'conspiracy+gullible': 0.4, 'grumpy+sleepy': 0.4
 };
 
-export const NAMES = ['Abi', 'Bo', 'Cass', 'Dex', 'Eli', 'Fen', 'Gus', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lia',
-  'Milo', 'Nia', 'Oz', 'Pip', 'Quin', 'Rae', 'Sol', 'Tam', 'Uma', 'Vik', 'Wren', 'Zed', 'Bobo', 'Glimp',
-  'Noodle', 'Trix', 'Mopsy', 'Zork', 'Fizz', 'Wobble', 'Pickle', 'Gizmo', 'Sprout', 'Bean', 'Nugget', 'Dot'];
-export const COLORS = ['#f06595', '#4dabf7', '#51cf66', '#fcc419', '#9775fa', '#ff922b', '#20c997',
-  '#e64980', '#74c0fc', '#a9e34b', '#ffa8a8', '#868e96'];
-export const SKINS = ['#f1d3b3', '#e0ac69', '#8d5524', '#c68642', '#b5e48c', '#a5d8ff', '#ffc9e3'];
-export const HATS = [null, null, 'beanie', 'tophat', 'cap', 'flower', 'antenna', 'crown', 'bow'];
-
-// Weekday jobs (hours 0-24). Nobody here has a normal job.
-export const JOBS = [
-  { title: 'Cloud Inspector', start: 7, end: 14 },
-  { title: 'Professional Napper', start: 10, end: 16 },
-  { title: 'Sock Detective', start: 9, end: 17 },
-  { title: 'Bubble Wrap Tester', start: 8, end: 15 },
-  { title: 'Pigeon Translator', start: 6, end: 13 },
-  { title: 'Spoon Polisher', start: 9, end: 16 },
-  { title: 'Moon Accountant', start: 11, end: 19 },
-  { title: 'Puddle Consultant', start: 8, end: 14 },
-  { title: 'Snack Philosopher', start: 10, end: 18 }
-];
-export const SCHOOL = { title: 'School', start: 8, end: 15 };
+export const NAMES = ['Dale', 'Earl', 'Bev', 'Tammy', 'Cletus', 'Darlene', 'Randy', 'Crystal', 'Bubba',
+  'Lurleen', 'Skeeter', 'Wanda', 'Chet', 'Brandi', 'Duane', 'Rhonda', 'Gus', 'Peaches', 'Buck', 'Loretta',
+  'Travis', 'Starla', 'Hank', 'Misty', 'Jimbo', 'Dottie', 'Wade', 'Candy', 'Boone', 'Trixie', 'Moose',
+  'Velma', 'Rusty', 'Pam', 'Dwayne', 'Glenda'];
+export const SHIRTS = ['#e03131', '#1971c2', '#2f9e44', '#f08c00', '#7048e8', '#f783ac', '#fab005',
+  '#495057', '#e8590c', '#0c8599', '#f1f3f5', '#862e9c'];
+export const SKINS = ['#f1c9a5', '#e0ac69', '#c68642', '#8d5524', '#f5d6c0', '#a5673f'];
+export const HAIRS = ['#3b2314', '#8b5a2b', '#e8c55a', '#d9480f', '#212529', '#adb5bd'];
+export const HATS = [null, null, null, 'cap', 'cowboy', 'beanie', 'mohawk', 'bandana'];
+export const OUTFITS = ['shirt', 'shirt', 'tank', 'tank', 'robe'];
 
 // Life: everyone ages this many years per game day.
 export const YEARS_PER_DAY = 1;
 export const SCHOOL_AGE = 6;
 export const ADULT_AGE = 18;
 export const ELDER_AGE = 64;
+export const SCHOOL = { start: 8, end: 15 };
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];

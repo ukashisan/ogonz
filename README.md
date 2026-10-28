@@ -1,50 +1,57 @@
 # Ogonz
 
 A life simulator that plays itself. There is nothing to control: you watch the
-residents of the Ogonz apartments live their slightly ridiculous lives.
+residents of **Sunset Trailer Haven** chase get-rich-quick schemes, fall in
+love, feud, and get abducted by aliens.
 
 Watch: https://ukashisan.github.io/ogonz/
 
 ## What happens
 
-- **The building:** six apartments on three floors, a café and a party room on
-  the ground floor, and an elevator in the middle.
-- **Residents** have needs (Hunger, Energy, Bladder, Hygiene, Fun, Social) and
-  two personality traits each: cheerful, grumpy, romantic, prankster, dramatic,
-  gossip, shy, sleepy, party animal or conspiracy theorist. Traits decide who
-  clicks and who clashes.
+- **The park:** a pixel-art trailer park seen from above, with a BBQ, a
+  kiddie-pool hot tub, a porta-potty (often out of order), a shopping-cart race
+  track, snail racing, a laundromat run by cats, a trampoline and a catapult.
+- **Schemes:** every adult runs one at a stall by their trailer: lemonade at
+  $20 a cup, a crypto mine in a bathtub, a pyramid scheme, alien urine, digging
+  for oil, selling air, a fish farm, worms, NFT rocks, miracle hair tonic,
+  "invest in my robot", a car-hood tanning bed, a cart casino. Neighbours buy
+  from each other, hustlers pitch, schemes boom and bust, and scam victims
+  eventually realize the alien urine was apple juice.
+- **Residents** have needs and two personality traits each (cheerful, grumpy,
+  romantic, prankster, dramatic, gossip, hustler, gullible, sleepy, party
+  animal, conspiracy theorist; the last wear tinfoil hats).
 - **Relationships** run from Nemesis, Enemy and Rival through Stranger,
-  Acquaintance, Friend and Best friend to Crush and In love. They grow out of
-  chats (good or bad, depending on chemistry), arguments, pranks, gossip about
-  third parties, and flirting.
+  Acquaintance, Friend and Best friend to Crush and In love, built from chats,
+  arguments, pranks, gossip, sales pitches and flirting.
 - **Life goes on:** one year per game day. Couples move in together, have
-  babies and sometimes break up; kids go to school; grown-ups have silly jobs
-  (Cloud Inspector, Sock Detective, Pigeon Translator…); newcomers fill empty
-  apartments; elders eventually float off to the great apartment in the sky.
-- **Silly events:** alien abductions, pizza rain, a sulking elevator, ghosts,
-  gravity switching off, a duck appointed building manager, surprise dance
-  parties, residents turning into cats or going invisible, body swaps and
-  accidental love potions.
-- The side panel follows a different resident every 15 seconds (traits, job,
-  needs, strongest feelings), plus building gossip, the resident list and news.
+  babies and break up; kids go to school; newcomers pull in with a trailer and
+  big dreams; elders ride off to the big trailer park in the sky.
+- **Silly events:** alien abductions, pizza rain, a get-rich-quick seminar that
+  takes everyone's money, shopping-cart grand prix, snail derbies, goose
+  attacks, raccoon heists, oil gushers, tiny tornadoes, porta-potty explosions,
+  bathrobe BBQ parties, cat curses, invisibility, body swaps, love potions.
+- The HUD shows the day, park cash, open schemes and the top hustler; a
+  spotlight card follows a different resident every 15 seconds; the news
+  ticker tells the story.
 
 The only controls are pause and speed (buttons, or keys `space`, `1`, `2`, `3`).
 
-Plays in landscape on any device with a modern browser: TV (e.g. Fire TV's Silk
-browser), computer, tablet, or a phone held sideways. Install it with the
-browser's "Add to Home Screen" / "Install app" for full screen and offline play.
-The world saves automatically in the browser.
+Plays in landscape on any device with a modern browser: TV, computer, tablet,
+or a phone held sideways. Install it with the browser's "Add to Home Screen" /
+"Install app" for full screen and offline play. The world saves automatically
+in the browser.
 
 ## Code
 
 | Path | What |
 | --- | --- |
 | `src/sim.js` | Public API: new world, time steps, save/load. |
-| `src/core.js` | Needs, autonomy, elevator and movement, interactions between residents. |
-| `src/life.js` | Daily life: ageing, romance, breakups, babies, moving in and out. |
+| `src/core.js` | Needs, autonomy, walking, trailers, schemes, interactions between residents. |
+| `src/life.js` | Daily life: ageing, romance, breakups, babies, moving in and out, scheme booms and busts. |
 | `src/fun.js` | The silly events. |
-| `src/data.js` | Tunables: building layout, furniture, traits and chemistry, names, jobs. |
-| `src/render.js` | Canvas drawing. |
+| `src/data.js` | Tunables: park layout, amenities, schemes, traits and chemistry, names. |
+| `src/render.js` | Pixel-art drawing at 640x360, scaled up. |
+| `src/pixelfont.js` | Tiny 3x5 font for signs. |
 | `src/main.js` | Game loop, pause/speed, side panel, saving. |
 | `sw.js` | Offline cache. |
 | `tests/` | `sim.test.js` (rules, relationships, events, multi-generation runs) and `smoke.mjs` (browser test at landscape phone, tablet, desktop and TV sizes). |
