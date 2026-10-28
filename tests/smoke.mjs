@@ -50,9 +50,9 @@ try {
 
     await page.goto(url);
     await page.evaluate(() => navigator.serviceWorker.ready);
-    await page.locator('#panel h2', { hasText: 'Household' }).waitFor();
+    await page.locator('#panel h3', { hasText: 'Residents' }).waitFor();
     const start = await state();
-    for (const n of start.names) await page.locator('#panel .card strong', { hasText: n }).first().waitFor();
+    for (const n of start.names) await page.locator('#panel .chip', { hasText: n }).first().waitFor();
 
     // It runs by itself; speed it up and let a couple of days pass.
     await page.click('#speeds button[data-speed="15"]');
@@ -75,12 +75,12 @@ try {
     // Reload, then reload offline: the same household is still there.
     const saved = await state();
     await page.reload();
-    await page.locator('#panel h2', { hasText: 'Household' }).waitFor();
+    await page.locator('#panel h3', { hasText: 'Residents' }).waitFor();
     const reloaded = await state();
     if (reloaded.names.join() !== saved.names.join()) fail(name + ': save not restored');
     await context.setOffline(true);
     await page.reload();
-    await page.locator('#panel h2', { hasText: 'Household' }).waitFor();
+    await page.locator('#panel h3', { hasText: 'Residents' }).waitFor();
     if ((await state()).names.join() !== saved.names.join()) fail(name + ': offline reload failed');
 
     if (errors.length) fail(name + ': page errors: ' + errors.join('; '));

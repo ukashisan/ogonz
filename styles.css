@@ -20,7 +20,7 @@ button.on { background:var(--accent); color:#1b1f2a; border-color:var(--accent);
 
 #bar { display:flex; align-items:center; gap:.8rem; padding:.3rem .7rem; background:#151924; border-bottom:1px solid var(--line); flex:none; }
 #clock { font-weight:600; font-variant-numeric:tabular-nums; min-width:11rem; }
-#money { color:var(--good); font-weight:600; font-variant-numeric:tabular-nums; flex:1; }
+#money { color:var(--muted); font-weight:600; font-variant-numeric:tabular-nums; flex:1; }
 #speeds { display:flex; gap:.3rem; }
 #speeds button { min-width:3rem; padding:.3rem .5rem; font-size:.8rem; letter-spacing:-.12rem; min-height:2.3rem; }
 
@@ -43,6 +43,19 @@ h3 { margin:.9rem 0 .4rem; font-size:.85rem; text-transform:uppercase; letter-sp
 .needs { display:grid; grid-template-columns:4.8rem 1fr; gap:.3rem .5rem; align-items:center; font-size:.87rem; }
 .meter { height:.65rem; background:#151924; border-radius:.35rem; overflow:hidden; }
 .meter > i { display:block; height:100%; border-radius:.35rem; transition:width .3s; }
+.now { margin:.35rem 0 .5rem; font-weight:600; color:var(--accent); }
+.rels { list-style:none; margin:0; padding:0; display:grid; gap:.3rem; font-size:.9rem; }
+.rels li { display:flex; align-items:center; gap:.4rem; }
+.tag { margin-left:auto; font-size:.75rem; padding:.05rem .45rem; border-radius:1rem; background:#323a4e; color:var(--muted); }
+.tag.love { background:#e64980; color:#fff; }
+.tag.good { background:#2b8a3e; color:#fff; }
+.tag.bad { background:#c92a2a; color:#fff; }
+.chips { display:flex; flex-wrap:wrap; gap:.3rem; }
+.chip { display:inline-flex; align-items:center; gap:.3rem; padding:.15rem .5rem; border-radius:1rem; background:#323a4e;
+  font-size:.82rem; }
+.chip.on { background:var(--accent); color:#1b1f2a; }
+.chip.on .muted { color:#1b1f2a; }
+.chip .dot { width:.6rem; height:.6rem; }
 .log { font-size:.8rem; color:var(--muted); margin:0; padding-left:1rem; }
 
 #toast { position:fixed; left:50%; bottom:calc(1rem + env(safe-area-inset-bottom)); transform:translateX(-50%);

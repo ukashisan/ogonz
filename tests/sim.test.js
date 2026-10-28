@@ -1,171 +1,242 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as sim from '../src/sim.js';
-import { EXIT_X, CATALOG } from '../src/data.js';
+import { ROOMS, APARTMENTS, EXIT_X, MAX_PER_APARTMENT, CATALOG } from '../src/data.js';
 
 const fresh = (seed = 42) => sim.newGame(seed);
 const setAll = (o, v) => { for (const n in o.needs) o.needs[n] = v; };
-const objOf = (s, type) => s.objects.find(o => o.type === type);
-const noJob = o => { o.job = null; };
+const calm = o => { o.job = null; setAll(o, 95); };
+// Leave only the given residents in the building, with no jobs.
+function only(s, ...people) {
+  s.ogonz = people;
+  for (const o of people) { calm(o); o.rel = {}; o.partnerId = null; o.parents = []; o.out = null; o.plan = null; }
+  s.events = [];
+  s.rng = 1;
+}
+const hours = (s, h) => sim.step(s, h * 60);
 
-test('new game: a couple moves into a furnished house', () => {
+test('new game: four households in a six-apartment building', () => {
   const s = fresh();
-  assert.equal(s.ogonz.length, 2);
-  const [a, b] = s.ogonz;
-  assert.equal(a.partnerId, b.id);
-  assert.equal(b.partnerId, a.id);
-  assert.ok(s.ogonz.every(o => sim.stage(o) === 'adult' && o.job && o.job.pay > 0));
-  for (const t of ['fridge', 'bed', 'toilet', 'shower']) assert.ok(objOf(s, t), t);
-});
-
-test('hungry Ogon walks to the fridge and eats', () => {
-  const s = fresh();
-  s.ogonz.length = 1;
-  const o = s.ogonz[0];
-  noJob(o);
-  setAll(o, 95);
-  o.needs.hunger = 10;
-  sim.step(s, 60);
-  assert.ok(o.needs.hunger > 80, 'hunger ' + o.needs.hunger);
-});
-
-test('tired Ogon climbs the stairs to a bed and sleeps', () => {
-  const s = fresh();
-  s.ogonz.length = 1;
-  const o = s.ogonz[0];
-  noJob(o);
-  setAll(o, 95);
-  o.needs.energy = 15;
-  let slept = false;
-  for (let i = 0; i < 120 && !slept; i++) {
-    sim.step(s, 1);
-    slept = sim.isSleeping(s, o);
+  assert.equal(ROOMS.length, 8);
+  const occupied = APARTMENTS.filter(a => sim.residentsOf(s, a).length);
+  assert.equal(occupied.length, 4);
+  assert.ok(sim.residentsOf(s, '3B').some(o => o.parents.length), 'a family with a kid in 3B');
+  for (const o of s.ogonz) {
+    assert.equal(o.traits.length, 2);
+    assert.notEqual(o.traits[0], o.traits[1]);
   }
-  assert.ok(slept, 'never slept; doing ' + sim.activityLabel(o));
-  assert.equal(o.floor, 1);
+  for (const r of ROOMS) assert.ok(s.objects.some(x => x.room === r.id), r.id + ' has furniture');
 });
 
-test('lonely Ogonz chat on their own and grow closer', () => {
+test('hungry resident finds food', () => {
   const s = fresh();
-  const [a, b] = s.ogonz;
-  for (const o of s.ogonz) { noJob(o); setAll(o, 95); o.needs.social = 5; o.rel = {}; }
-  sim.step(s, 60);
-  assert.ok((a.rel[b.id] || 0) > 0 && (b.rel[a.id] || 0) > 0, JSON.stringify([a.rel, b.rel]));
-  assert.ok(a.needs.social > 30);
-});
-
-test('Ogon goes to work on a weekday and is paid on return', () => {
-  const s = fresh();
-  s.ogonz.length = 1;
   const o = s.ogonz[0];
-  o.job = { title: 'Test', start: 9, end: 17, pay: 300 };
-  o.workedDay = -1;                    // newcomers skip their moving-in day
-  const money = s.money;
-  sim.step(s, 9 * 60 - 7 * 60);
-  assert.ok(o.away, 'should be at work, doing ' + sim.activityLabel(o));
-  sim.step(s, 8 * 60 + 1);
-  assert.ok(!o.away);
+  only(s, o);
+  o.needs.hunger = 10;
+  hours(s, 1.5);
+  assert.ok(o.needs.hunger > 70, 'hunger ' + o.needs.hunger);
+});
+
+test('residents sleep in their own bed and only use their own or shared things', () => {
+  const s = fresh();
+  for (const o of s.ogonz) o.needs.energy = 10;
+  let slept = 0;
+  for (let i = 0; i < 24 * 60; i++) {
+    sim.step(s, 1);
+    for (const obj of s.objects) {
+      if (!obj.user) continue;
+      const u = sim.byId(s.ogonz, obj.user);
+      assert.ok(sim.room(obj.room).common || obj.room === u.home, u.name + ' used ' + obj.type + ' in ' + obj.room);
+      if (CATALOG[obj.type].sleep) slept++;
+    }
+  }
+  assert.ok(slept > 0);
+});
+
+test('the elevator takes residents between floors', () => {
+  const s = fresh();
+  const o = s.ogonz.find(x => sim.room(x.home).floor === 3) || s.ogonz[0];
+  only(s, o);
+  o.floor = 3;
+  o.needs.hunger = 5;
+  s.objects = s.objects.filter(x => x.type !== 'fridge');   // must go down to the café
+  hours(s, 1);
   assert.equal(o.floor, 0);
-  assert.ok(o.x < EXIT_X + 100);
-  assert.equal(s.money, money + 300);
+  assert.ok(o.needs.hunger > 40);
+});
+
+test('residents go to work on weekdays and come back', () => {
+  const s = fresh();
+  const o = s.ogonz[0];
+  only(s, o);
+  o.job = { title: 'Test', start: 9, end: 17 };
+  o.workedDay = -1;
+  hours(s, 2);
+  assert.equal(o.out && o.out.reason, 'work', 'doing ' + sim.activityLabel(s, o));
+  hours(s, 8.01);
+  assert.equal(o.out, null);
+  assert.equal(o.floor, 0);
+  assert.ok(o.x < EXIT_X + 100, 'walks in from the bus stop, x=' + o.x);
 });
 
 test('no work on weekends', () => {
   const s = fresh();
-  s.ogonz.length = 1;
   const o = s.ogonz[0];
-  o.job = { title: 'Test', start: 9, end: 17, pay: 300 };
+  only(s, o);
+  o.job = { title: 'Test', start: 9, end: 17 };
   s.minutes = 5 * 1440 + 8 * 60;
   s.lastDay = 5;
-  sim.step(s, 120);
-  assert.ok(!o.away);
+  s.lastHour = 5 * 24 + 8;
+  hours(s, 2);
+  assert.equal(o.out, null);
 });
 
-test('full bladder causes an accident', () => {
+test('a full bladder causes an accident', () => {
   const s = fresh();
-  s.ogonz.length = 1;
   const o = s.ogonz[0];
+  only(s, o);
   s.objects = s.objects.filter(x => x.type !== 'toilet');
-  noJob(o);
   o.needs.bladder = 0.1;
   sim.step(s, 1);
   assert.equal(o.needs.hygiene, 0);
   assert.ok(s.log.some(l => l.text.includes('accident')));
 });
 
-test('children go to school at 6 and get a job at 18; adults retire', () => {
+function meet(traitsA, traitsB) {
   const s = fresh();
-  const [a] = s.ogonz;
-  const kid = s.ogonz[1];
-  kid.partnerId = null; a.partnerId = null;
-  kid.age = 5.5; kid.job = null; kid.parents = [a.id];
-  a.age = 63.5;
-  s.ogonz.forEach(o => { o.rel = {}; });
-  sim.step(s, 1440);
-  assert.equal(kid.job && kid.job.title, 'School');
-  assert.equal(a.job, null, 'retired');
-  kid.age = 17.5;
-  sim.step(s, 1440);
-  assert.equal(sim.stage(kid), 'adult');
-  assert.ok(kid.job && kid.job.pay > 0);
+  const [a, b] = s.ogonz;
+  only(s, a, b);
+  a.traits = traitsA;
+  b.traits = traitsB;
+  a.needs.social = b.needs.social = 5;
+  a.floor = b.floor = 0;
+  a.x = 300; b.x = 330;
+  hours(s, 2);
+  return [s, a, b];
+}
+
+test('personalities clash or click', () => {
+  const [, a1, b1] = meet(['grumpy', 'shy'], ['cheerful', 'party']);
+  const [, a2, b2] = meet(['party', 'cheerful'], ['party', 'cheerful']);
+  assert.ok(sim.compat(a1, b1) < 0 && sim.compat(a2, b2) > 0);
+  assert.ok(sim.pairRel(a1, b1) < sim.pairRel(a2, b2), sim.pairRel(a1, b1) + ' vs ' + sim.pairRel(a2, b2));
+  assert.ok(sim.pairRel(a2, b2) > 10);
 });
 
-test('a loving couple has children, who get beds', () => {
-  const s = fresh(7);
-  s.money = 5000;
-  sim.step(s, 1440 * 30);
-  const kids = s.ogonz.filter(o => o.parents.length);
-  assert.ok(kids.length >= 1, 'no babies in 30 days: ' + s.log.map(l => l.text).join(' | '));
-  const beds = s.objects.filter(o => o.type === 'bed').length;
-  assert.ok(beds >= Math.min(s.ogonz.length, 6) - 1, beds + ' beds for ' + s.ogonz.length);
+test('enemies argue, and pranksters prank', () => {
+  const s = fresh();
+  const [a, b] = s.ogonz;
+  only(s, a, b);
+  a.traits = ['grumpy', 'dramatic'];
+  b.traits = ['shy', 'sleepy'];
+  a.rel[b.id] = b.rel[a.id] = -50;
+  a.needs.social = 5;
+  a.floor = b.floor = 0; a.x = 300; b.x = 320;
+  let kinds = new Set();
+  for (let i = 0; i < 120; i++) {
+    sim.step(s, 1);
+    const st = a.plan && a.plan.steps[0];
+    if (st && st.type === 'interact') kinds.add(st.kind);
+  }
+  assert.ok(kinds.has('argue'), [...kinds].join());
+  assert.ok(sim.pairRel(a, b) < -50);
+  assert.ok(['Enemy', 'Nemesis'].includes(sim.relLabel(s, a, b)));
 });
 
-test('elders pass away and a new family arrives when the house is empty', () => {
+test('relationships span hostile to in love', () => {
   const s = fresh();
-  for (const o of s.ogonz) o.age = 95;
-  sim.step(s, 1440 * 10);
-  assert.ok(s.ogonz.length >= 1);
-  assert.ok(s.ogonz.every(o => o.age < 95), 'the old couple should be gone');
-  assert.ok(s.log.some(l => l.text.includes('passed away')));
-  assert.ok(s.generation >= 2 || s.log.some(l => l.text.includes('moved in')));
+  const [a, b] = s.ogonz;
+  only(s, a, b);
+  const labels = new Set();
+  for (const v of [-90, -50, -20, 0, 20, 45, 65]) {
+    a.rel[b.id] = b.rel[a.id] = v;
+    labels.add(sim.relLabel(s, a, b));
+  }
+  a.rel[b.id] = b.rel[a.id] = 80;
+  labels.add(sim.relLabel(s, a, b));
+  a.partnerId = b.id; b.partnerId = a.id;
+  labels.add(sim.relLabel(s, a, b));
+  assert.deepEqual([...labels], ['Nemesis', 'Enemy', 'Rival', 'Stranger', 'Acquaintance', 'Friend', 'Best friend', 'Crush', 'In love']);
 });
 
-test('broken furniture is avoided and repaired', () => {
-  const s = fresh();
-  const fridge = objOf(s, 'fridge');
-  fridge.broken = true;
-  s.ogonz.length = 1;
-  const o = s.ogonz[0];
-  noJob(o);
-  setAll(o, 95);
-  o.needs.hunger = 10;
-  sim.step(s, 30);
-  assert.ok(o.needs.hunger < 15, 'should not eat from a broken fridge');
-  sim.step(s, 1440);
-  assert.equal(fridge.broken, false);
+test('crushes become couples who move in together, have babies, and can break up', () => {
+  const s = fresh(5);
+  const a = sim.residentsOf(s, '2B')[0], b = sim.residentsOf(s, '3A')[0];
+  only(s, a, b);
+  a.age = b.age = 28;
+  a.traits = b.traits = ['romantic', 'cheerful'];
+  a.rel[b.id] = b.rel[a.id] = 90;
+  hours(s, 24 * 3);
+  assert.equal(a.partnerId, b.id);
+  assert.equal(a.home, b.home, 'moved in together');
+  hours(s, 24 * 20);
+  assert.ok(s.ogonz.some(o => o.parents.includes(a.id)), 'a baby');
+  a.rel[b.id] = b.rel[a.id] = -40;
+  hours(s, 24 * 4);
+  assert.equal(a.partnerId, null);
+  assert.ok(s.log.some(l => l.text.includes('broke up')));
+});
+
+test('empty apartments fill up and none overflows', () => {
+  const s = fresh(9);
+  for (let d = 0; d < 60; d++) {
+    hours(s, 24);
+    for (const apt of APARTMENTS) assert.ok(sim.residentsOf(s, apt).length <= MAX_PER_APARTMENT, apt + ' overflowing');
+  }
+  assert.ok(APARTMENTS.filter(a => sim.residentsOf(s, a).length).length >= 4);
+});
+
+test('every silly event starts and ends cleanly', () => {
+  for (const type of Object.keys(sim.EVENTS)) {
+    const s = fresh(3);
+    s.minutes = 18 * 60;          // evening: everyone home
+    s.lastHour = 18;
+    for (const o of s.ogonz) { o.out = null; o.job = null; }
+    s.eventRate = 0;              // no other random events during the test
+    const looks = s.ogonz.map(o => o.id + o.color + o.hat);
+    assert.ok(sim.EVENTS[type](s), type + ' did not start');
+    hours(s, 26);
+    assert.ok(!s.events.some(e => e.type === type && e.until < s.minutes), type + ' never ended');
+    if (type === 'swap') {
+      assert.deepEqual(s.ogonz.slice(0, looks.length).map(o => o.id + o.color + o.hat), looks, 'looks swapped back');
+    }
+  }
+});
+
+test('alien abductees come back', () => {
+  const s = fresh(3);
+  s.minutes = 18 * 60;
+  s.lastHour = 18;
+  for (const o of s.ogonz) { o.out = null; o.job = null; }
+  sim.EVENTS.ufo(s);
+  const gone = s.ogonz.find(o => o.out && o.out.reason === 'space');
+  assert.ok(gone);
+  assert.equal(sim.activityLabel(s, gone), 'In outer space');
+  hours(s, 6);
+  assert.equal(gone.out, null);
 });
 
 test('save and load round-trip, old saves rejected', () => {
   const s = fresh();
-  sim.step(s, 300);
-  const back = sim.deserialize(sim.serialize(s));
-  assert.deepEqual(back, s);
-  assert.throws(() => sim.deserialize('{"version":1,"ogonz":[],"objects":[]}'));
+  hours(s, 30);
+  assert.deepEqual(sim.deserialize(sim.serialize(s)), s);
+  assert.throws(() => sim.deserialize('{"version":2,"ogonz":[],"objects":[]}'));
 });
 
-test('a long life stays sane for many generations', () => {
+test('a long run stays sane across generations', () => {
   for (const seed of [1, 2, 3]) {
     const s = fresh(seed);
-    for (let d = 0; d < 200; d++) {
-      sim.step(s, 1440);
-      assert.ok(s.ogonz.length <= 6, 'too many Ogonz');
+    for (let d = 0; d < 150; d++) {
+      hours(s, 24);
+      for (const apt of APARTMENTS) assert.ok(sim.residentsOf(s, apt).length <= MAX_PER_APARTMENT);
       for (const o of s.ogonz) {
         for (const v of Object.values(o.needs)) assert.ok(v >= 0 && v <= 100 && !Number.isNaN(v));
-        assert.ok(o.floor === 0 || o.floor === 1);
+        assert.ok(o.floor >= 0 && o.floor <= 3);
+        assert.ok(APARTMENTS.includes(o.home));
         if (o.partnerId) assert.equal(sim.byId(s.ogonz, o.partnerId).partnerId, o.id, 'partners match');
       }
+      for (const obj of s.objects) if (obj.user) assert.ok(sim.byId(s.ogonz, obj.user), 'object used by a ghost');
     }
-    assert.ok(s.ogonz.length >= 1, 'seed ' + seed + ': house empty');
-    assert.ok(Number.isFinite(s.money));
+    assert.ok(s.ogonz.length >= 2, 'seed ' + seed + ': building empty');
   }
 });
