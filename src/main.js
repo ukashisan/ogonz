@@ -1,5 +1,7 @@
 // App shell: game loop, pause / speed, the HUD boxes, saving.
 // The park plays itself; there is no other input.
+// Served by server/server.js, the page is only a viewer: the park runs on the
+// computer and streams here, so a TV and a laptop show the same park.
 
 import { WORLD, NEEDS, NEED_LABELS, WEEKDAYS, TRAITS, SCHEMES } from './data.js';
 import * as sim from './sim.js';
@@ -16,10 +18,48 @@ pix.width = WORLD.w;
 pix.height = WORLD.h;
 const pctx = pix.getContext('2d');
 
-let s = load() || sim.newGame();
+const remote = await serverRunning();
+let s = remote ? null : load() || sim.newGame();
 let speed = 4;
 let spotlightId = null;
 let spotlightSince = 0;
+
+// ---------- viewer mode ----------
+
+async function serverRunning() {
+  try {
+    const r = await fetch('api/info', { cache: 'no-store', signal: AbortSignal.timeout(2000) });
+    return r.ok && (await r.json()).game === 'ogonz';
+  } catch (e) {
+    return false;
+  }
+}
+
+// Snapshots arrive ten times a second; positions are blended between the
+// last two so walking stays smooth.
+const SNAPSHOT_MS = 100;
+let prev = null, prevAt = 0, gotAt = 0;
+function listen() {
+  const src = new EventSource('api/stream');
+  src.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    prev = s; prevAt = gotAt;
+    s = msg.state; gotAt = performance.now();
+    if (msg.speed !== speed) markSpeed(msg.speed);
+    $('offline').hidden = true;
+  };
+  src.onerror = () => { $('offline').hidden = false; };
+}
+function blended(now) {
+  if (!prev) return s;
+  const k = Math.min(1, (now - gotAt) / Math.max(1, Math.min(gotAt - prevAt, SNAPSHOT_MS * 3)));
+  const before = new Map(prev.ogonz.map(o => [o.id, o]));
+  return { ...s, ogonz: s.ogonz.map(o => {
+    const p = before.get(o.id);
+    if (!p || Math.hypot(o.x - p.x, o.y - p.y) > 40) return o;     // went indoors, launched, moved house
+    return { ...o, x: p.x + (o.x - p.x) * k, y: p.y + (o.y - p.y) * k };
+  }) };
+}
 
 // ---------- saving ----------
 
@@ -32,6 +72,7 @@ function load() {
   }
 }
 function save() {
+  if (remote) return;
   try { localStorage.setItem(SAVE_KEY, sim.serialize(s)); } catch (e) { /* storage full or blocked */ }
 }
 setInterval(save, 15000);
@@ -52,13 +93,21 @@ resize();
 // ---------- speed ----------
 
 function setSpeed(v) {
+  markSpeed(v);
+  if (remote) fetch('api/speed?v=' + v, { method: 'POST' }).catch(() => {});
+}
+function markSpeed(v) {
   speed = v;
   for (const b of document.querySelectorAll('#speeds button')) b.classList.toggle('on', Number(b.dataset.speed) === v);
 }
 for (const b of document.querySelectorAll('#speeds button')) b.addEventListener('click', () => setSpeed(Number(b.dataset.speed)));
 addEventListener('keydown', e => {
   if (e.target.closest('button')) return;      // let Space/Enter press the focused button
-  const keys = { ' ': speed ? 0 : 4, '1': 1, '2': 4, '3': 15 };
+  // Keyboard, and the Fire TV remote's play / fast-forward / rewind keys.
+  const SPEEDS = [0, 1, 4, 15];
+  const i = SPEEDS.indexOf(speed);
+  const keys = { ' ': speed ? 0 : 4, '1': 1, '2': 4, '3': 15, MediaPlayPause: speed ? 0 : 4,
+    MediaFastForward: SPEEDS[Math.min(3, i + 1)], MediaRewind: SPEEDS[Math.max(0, i - 1)] };
   if (e.key in keys) { e.preventDefault(); setSpeed(keys[e.key]); }
 });
 setSpeed(speed);
@@ -107,24 +156,25 @@ function buildSpot() {
   spotUpdaters = [];
   const box = $('spot');
   if (!o) { box.replaceChildren(); return; }
-  const live = (node, fn) => { spotUpdaters.push(() => fn(node)); return node; };
+  // Look the resident up each time: in viewer mode every snapshot is a new object.
+  const live = (node, fn) => { spotUpdaters.push(() => fn(node, sim.byId(s.ogonz, o.id) || o)); return node; };
   const needs = el('div', { class: 'needs' });
   for (const n of NEEDS) {
     const fill = el('i');
-    live(fill, f => { const v = o.needs[n]; f.style.width = v + '%'; f.style.background = `hsl(${Math.round(v * 1.2)}, 70%, 50%)`; });
+    live(fill, (f, o) => { const v = o.needs[n]; f.style.width = v + '%'; f.style.background = `hsl(${Math.round(v * 1.2)}, 70%, 50%)`; });
     needs.append(el('span', {}, NEED_LABELS[n]), el('div', { class: 'meter' }, fill));
   }
   box.replaceChildren(
     el('div', { class: 'name' }, o.name),
-    live(el('div', { class: 'muted' }), n => {
+    live(el('div', { class: 'muted' }), (n, o) => {
       const st = sim.stallOf(s, o);
       const what = st ? SCHEMES[st.type].name : sim.stage(o) === 'child' ? 'Kid' : 'No scheme';
       setText(n, Math.floor(o.age) + ' · ' + o.traits.map(t => TRAITS[t]).join(', ') + ' · ' + what + ' · ' + sim.money(o.cash));
     }),
-    live(el('div', { class: 'now' }), n => setText(n, sim.activityLabel(s, o))),
+    live(el('div', { class: 'now' }), (n, o) => setText(n, sim.activityLabel(s, o))),
     needs,
-    live(el('ul', { class: 'rels' }), n => {
-      const rows = s.ogonz.filter(x => x !== o)
+    live(el('ul', { class: 'rels' }), (n, o) => {
+      const rows = s.ogonz.filter(x => x.id !== o.id)
         .map(x => ({ x, v: sim.pairRel(o, x), label: sim.relLabel(s, o, x) }))
         .filter(r => r.label !== 'Stranger')
         .sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).slice(0, 3);
@@ -158,11 +208,12 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
-  if (speed) sim.step(s, dt * speed);
+  if (!s) { requestAnimationFrame(frame); return; }          // waiting for the first snapshot
+  if (!remote && speed) sim.step(s, dt * speed);
   if (!sim.byId(s.ogonz, spotlightId)) spotlightSince = 0;
   updateSpotlight(now);
 
-  draw(pctx, s, { selectedId: spotlightId, time: now / 1000 });
+  draw(pctx, remote ? blended(now) : s, { selectedId: spotlightId, time: now / 1000 });
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(pix, 0, 0, canvas.width, canvas.height);
 
@@ -171,6 +222,7 @@ function frame(now) {
   updateNews();
   requestAnimationFrame(frame);
 }
+if (remote) listen();
 requestAnimationFrame(frame);
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
@@ -178,4 +230,4 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 
 // Exposed for automated tests.
-window.__ogonz = { get state() { return s; }, sim, setSpeed, save };
+window.__ogonz = { get state() { return s; }, sim, setSpeed, save, remote };

@@ -1,0 +1,40 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'app.ogonz.tv'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'app.ogonz.tv'
+        minSdk 22
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // A fixed key, so a newer APK installs over the old one. It only proves
+    // updates come from the same place; it guards nothing secret.
+    signingConfigs {
+        shared {
+            storeFile file('ogonz.keystore')
+            storePassword 'ogonz-tv'
+            keyAlias 'ogonz'
+            keyPassword 'ogonz-tv'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.shared
+        }
+        debug {
+            signingConfig signingConfigs.shared
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

@@ -39,6 +39,9 @@ body { display:flex; align-items:center; justify-content:center; height:100dvh; 
 #news li:first-child { color:#fff; font-weight:700; }
 #news li:not(:first-child) { color:var(--muted); font-size:0.9em; }
 
+#offline { left:50%; top:50%; transform:translate(-50%,-50%); font-size:1.4em; color:#fff; }
+#offline[hidden] { display:none; }
+
 /* Held upright: ask to turn the device. */
 #rotate { display:none; position:fixed; inset:0; z-index:10; background:#15110d;
   flex-direction:column; align-items:center; justify-content:center; gap:1rem; text-align:center; padding:2rem; }

@@ -1,2 +1,9 @@
 node_modules/
 smoke-test.png
+ogonz-save.json
+ogonz-save.json.tmp
+ogonz-tv.apk
+tv/.gradle/
+tv/build/
+tv/app/build/
+tv/local.properties
